@@ -40,7 +40,7 @@ Setting the ALIGN_PTR_LOW_BITS macro to a positive value, can increase the numbe
 thus allowing compression of larger adresses, but will reduce usable memory, as it will also lead to its increased fragmentation.
 */
     #define ALIGN_PTR_LOW_BITS 4
-    #define COMPRESS_POINTERS -5
+    #define COMPRESS_POINTERS 5
 #else
     #define ALIGN_PTR_LOW_BITS 0
     #define COMPRESS_POINTERS 0
@@ -484,7 +484,7 @@ namespace cmpsptr
 #endif
         }
 
-        uint32_t _ptr = 0U;
+        uint32_t _ptr;
 
     protected:
         static bool clearList(uint32_t ptr)
@@ -534,8 +534,8 @@ namespace cmpsptr
 
         inline T* addr() const
         {
-            const uint32_t ptr = this->_ptr;
-            if (ptr == 0)
+            auto ptr = this->_ptr;
+            if (ptr == 0U)
             {
                 return nullptr;
             }
@@ -637,7 +637,7 @@ namespace cmpsptr
             return !listed(this->_ptr);
         }
 
-        inline BaseCmp<T, own, opt, level>() {}
+        inline BaseCmp<T, own, opt, level>() : _ptr(0U) {}
 
         inline ~BaseCmp<T, own, opt, level>()
         {

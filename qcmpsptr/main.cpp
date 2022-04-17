@@ -67,7 +67,7 @@ void testFunc(CmpsCnt<ThirdTest> thirdTest)
 {
     qDebug() << "sizeof(secondTestPtr) = " << sizeof(thirdTest->secondTestPtr);
     qDebug() << "firstTestPtr->a = " << thirdTest->secondTestPtr->firstTestPtr->a;
-    qDebug() << "secondTestPtr->a = " << thirdTest->secondTestPtr->b;
+    qDebug() << "secondTestPtr->b = " << thirdTest->secondTestPtr->b;
     testFunc2(thirdTest);
 }
 
