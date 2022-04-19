@@ -460,33 +460,7 @@ namespace cmpsptr
         {
             return (ptr & 1U) == 1U;
         }
-    };
-#define CMPS_LEVEL COMPRESS_POINTERS - 2
-    template<typename T, const int own = 0, const int opt = -1, const int level = CMPS_LEVEL>
-    class BaseCmp : public BasePtr<T, BaseCmp<T, own, opt, level>, opt>, protected PtrList
-    {
-        static constexpr uint32_t CmpsLengthShift(int cmpsLevel)
-        {
-            if (cmpsLevel == -1)
-            {
-                return 0;
-            }
-            if (cmpsLevel < -1)
-            {
-                cmpsLevel = (cmpsLevel * -1) - 1;
-            }
-#if ALIGN_PTR_LOW_BITS > 0
-#define ALIGN_POINTERS 1U << ALIGN_PTR_LOW_BITS
-            uint32_t bits = ALIGN_PTR_LOW_BITS - 1;
-            return static_cast<uint32_t>(cmpsLevel) > bits ? bits : cmpsLevel;
-#else
-            return cmpsLevel > 1 ? 2 : cmpsLevel;
-#endif
-        }
 
-        uint32_t _ptr;
-
-    protected:
         static bool clearList(uint32_t ptr)
         {
             if (ptr == 0U)
@@ -532,23 +506,6 @@ namespace cmpsptr
             return true;
         }
 
-        inline T* addr() const
-        {
-            auto ptr = this->_ptr;
-            if (ptr == 0U)
-            {
-                return nullptr;
-            }
-            else if (listed(ptr))
-            {
-                return static_cast<T*>(_ptr_list[(ptr >> 1) - 1U]);
-            }
-            else
-            {
-                return reinterpret_cast<T*>(static_cast<uintptr_t>(this->_ptr) << SHIFT_LEN);
-            }
-        }
-
         void listPtr(void* const ptr)
         {
             //qDebug() << "listPtr: ptr = " << ptr;
@@ -587,6 +544,49 @@ namespace cmpsptr
             //_locker.unlock();
         }
 
+        uint32_t _ptr;
+    };
+#define CMPS_LEVEL COMPRESS_POINTERS - 2
+    template<typename T, const int own = 0, const int opt = -1, const int level = CMPS_LEVEL>
+    class BaseCmp : public BasePtr<T, BaseCmp<T, own, opt, level>, opt>, protected PtrList
+    {
+        static constexpr uint32_t CmpsLengthShift(int cmpsLevel)
+        {
+            if (cmpsLevel == -1)
+            {
+                return 0;
+            }
+            if (cmpsLevel < -1)
+            {
+                cmpsLevel = (cmpsLevel * -1) - 1;
+            }
+#if ALIGN_PTR_LOW_BITS > 0
+#define ALIGN_POINTERS 1U << ALIGN_PTR_LOW_BITS
+            uint32_t bits = ALIGN_PTR_LOW_BITS - 1;
+            return static_cast<uint32_t>(cmpsLevel) > bits ? bits : cmpsLevel;
+#else
+            return cmpsLevel > 1 ? 2 : cmpsLevel;
+#endif
+        }
+
+    protected:
+        inline T* addr() const
+        {
+            auto ptr = this->_ptr;
+            if (ptr == 0U)
+            {
+                return nullptr;
+            }
+            else if (listed(ptr))
+            {
+                return static_cast<T*>(_ptr_list[(ptr >> 1) - 1U]);
+            }
+            else
+            {
+                return reinterpret_cast<T*>(static_cast<uintptr_t>(this->_ptr) << SHIFT_LEN);
+            }
+        }
+
         inline void setAddr(std::nullptr_t)
         {
             if (clearList(this->_ptr))
@@ -596,7 +596,7 @@ namespace cmpsptr
             }
         }
 
-        void setAddr(T* const ptr)
+        void setAddr(void* const ptr)
         {
             if (this->addr() == ptr)
             {
@@ -637,7 +637,10 @@ namespace cmpsptr
             return !listed(this->_ptr);
         }
 
-        inline BaseCmp<T, own, opt, level>() : _ptr(0U) {}
+        inline BaseCmp<T, own, opt, level>()
+        {
+            this->_ptr = 0U;
+        }
 
         inline ~BaseCmp<T, own, opt, level>()
         {
