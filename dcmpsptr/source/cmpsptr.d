@@ -24,7 +24,7 @@ The following negative values can also be used, but they are not safe and will l
     -2 can compress addresses up to 8GB, at the expense of the lower tag bit, which can no longer be used for other purporses
     -1 can compress addresses up to 4GB, leaving the 3 lower tag bits to be used for other purporses
 */
-enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : -4;
+enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 4;
 
 enum nil = null;
 alias S8 = byte;
@@ -96,7 +96,7 @@ alias Nr = SNr;
                 return;
             }
         }
-        size_t ptrLength = ptrList.length;
+        ZNr ptrLength = ptrList.length;
         for (UNr i = 0; i < ptrLength; i += 1U)
         {
             if ((*ptrList)[i] == nil)
@@ -164,7 +164,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
     static if (own != 0)
     {
         pragma(inline, true)
-        @system protected void clean() @nogc nothrow
+        @system protected void clean()
         {
             this.ptr.erase;
             //T* ptr = this.ptr;
@@ -179,20 +179,25 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
     
     static if (own > 0)
     {
-        protected CmpsPtr!(size_t, 0, cmpsType == 0 ? 0 : (cmpsType > 0 ? 3 : -4)) count = void;
+        protected CmpsPtr!(ZNr, 0, cmpsType == 0 ? 0 : (cmpsType > 0 ? 4 : -5)) count = void;        
 
         pragma(inline, true)
         {
+            public ZNr refCount()
+            {
+                return *(this.count.ptr);
+            }
+
             protected
             {
-                @system void reset() @nogc nothrow
+                @system void reset() //@nogc nothrow
                 {
-                    size_t* countPtr = alloc!size_t;
+                    ZNr* countPtr = alloc!ZNr;
                     (*countPtr) = 0;
                     this.count.ptr(countPtr);
                 }
                 
-                @system void increase() @nogc nothrow 
+                @system void increase() //@nogc nothrow 
                 {
                     auto cntPtr = this.count.ptr;
                     if (cntPtr)
@@ -203,7 +208,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
             }
         }
 
-        @system protected void decrease() @nogc nothrow
+        @system protected void decrease() //@nogc nothrow
         {
             auto count = &this.count;
             auto cntPtr = count.ptr;
@@ -233,7 +238,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         enum SHIFT_LEN = cmpsType > 3 ? 3 : (cmpsType - 1);
         private UNr _ptr = 0U;
 
-        @system private static bool clearList(UNr ptr) @nogc nothrow
+        @system private static Bit clearList(UNr ptr)
         {
             if (ptr == 0U)
             {
@@ -246,7 +251,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 
                 if (ptr == ptrList.length)
                 {
-                    size_t ptrListLen = void;
+                    ZNr ptrListLen = void;
                     do
                     {
                         ptrList.removeBack();
@@ -265,7 +270,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         {
             public
             {
-                @safe bool compressed() @nogc nothrow
+                @safe Bit compressed() @nogc nothrow
                 {
                     return (this._ptr & 1U) != 1U;
                 }
@@ -305,7 +310,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                     return;
                 }
             }
-            size_t ptrLength = ptrList.length;
+            ZNr ptrLength = ptrList.length;
             for (UNr i = 0; i < ptrLength; i += 1U)
             {
                 if ((*ptrList)[i] == nil)
@@ -320,7 +325,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         }
 
         pragma(inline, true)
-        @system public void ptr(T* ptr) @nogc nothrow
+        @system public void ptr(T* ptr)
         {
             static if (own == 0)
             {
@@ -354,7 +359,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 }
             }
             const PNr ptrNr = cast(PNr)ptr; //<< 16) >>> 16;
-            if (ptrNr < (4294967296UL << SHIFT_LEN))
+            if (ptrNr < (4294967295UL << SHIFT_LEN))
             {
                 static if (own < 0)
                 {
@@ -378,7 +383,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         static if (own < 0)
         {
             pragma(inline, true)
-            @system ~this() @nogc nothrow
+            @system ~this()
             {
                 this.clean;
             }
@@ -386,7 +391,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         else
         {
             pragma(inline, true)
-            @system ~this() @nogc nothrow
+            @system ~this()
             {
                 static if (own < 1)
                 {
@@ -409,7 +414,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         pragma(inline, true)
         {
             public:
-            @safe bool compressed() @nogc nothrow
+            @safe Bit compressed() @nogc nothrow
             {
                 return true;
             }
@@ -432,7 +437,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 return cast(T*)((cast(PNr)this._ptr) << SHIFT_LEN);
             }
             
-            @system void ptr(const T* ptr) @nogc nothrow
+            @system void ptr(const T* ptr) //@nogc nothrow
             {
                 /*if (ptr == nil)
                 {
@@ -448,11 +453,12 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                             this.reset;
                         }
                     }
-                    PNr ptrNr = cast(PNr)ptr;
+                    //PNr ptrNr = cast(PNr)ptr;
                     //printf("PNr = %d\n", ptrNr);
                     //PNr ptrNr = (cast(PNr)ptr << 16) >>> 16;
-                    //assert(ptrNr < (4294967296UL << SHIFT_LEN)); //TODO: analyze alternative solutions
-                    this._ptr = cast(UNr)(ptrNr >>> SHIFT_LEN);
+                    //assert(ptrNr < (4294967295UL << SHIFT_LEN)); //TODO: analyze alternative solutions
+                    this._ptr = cast(UNr)((cast(PNr)ptr) >>> SHIFT_LEN);
+                    //this._ptr = cast(UNr)(ptrNr >>> SHIFT_LEN);
                 //}
             }
         }
@@ -460,7 +466,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         static if (own < 0)
         {
             pragma(inline, true):
-            @system ~this() @nogc nothrow
+            @system ~this() //@nogc nothrow
             {
                 this.clean;
             }
@@ -468,7 +474,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         else static if (own > 0)
         {
             pragma(inline, true)
-            @system ~this() @nogc nothrow
+            @system ~this() //@nogc nothrow
             {
                 this.decrease;
             }
@@ -482,7 +488,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         @disable this(this);
         
         pragma(inline, true)
-        @system this(ref return scope CmpsPtr copy) @nogc nothrow
+        @system this(ref return scope CmpsPtr copy) //@nogc nothrow
         {
             //this.count = nil;
             this.ptr = copy.ptr;
@@ -501,7 +507,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
     }
             
     pragma(inline, true)
-    @system this(T* ptr) @nogc nothrow
+    @system this(T* ptr)
     {
         static if (own > 0)
         {
@@ -518,7 +524,7 @@ pragma(inline, true)
         return cast(T*)malloc(T.sizeof * qty);
     }
 
-    @system void clear(T, const bool check = false)(T** ptr) @nogc nothrow
+    @system void clear(T, const Bit check = false)(T** ptr) @nogc nothrow
     {
         static if (check)
         {
@@ -528,13 +534,13 @@ pragma(inline, true)
         (*ptr) = nil;
     }
 
-    @system void clear(T, const bool check = false)(CmpsPtr!T ptr) @nogc nothrow
+    @system void clear(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
     {
         ptr.erase!(T, check);
         ptr.ptr = nil;
     }
 
-    @system void erase(T, const bool check = false)(T* ptr) @nogc nothrow
+    @system void erase(T, const Bit check = false)(T* ptr)
     {
         static if (check)
         {
@@ -544,7 +550,7 @@ pragma(inline, true)
         ptr.free;
     }
 
-    @system void erase(T, const bool check = false)(CmpsPtr!T ptr) @nogc nothrow
+    @system void erase(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
     {
         ptr.ptr.erase!(T, check);
     }
