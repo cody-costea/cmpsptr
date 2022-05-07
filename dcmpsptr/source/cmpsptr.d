@@ -161,7 +161,7 @@ alias Nr = SNr;
 
 struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
 {
-    static if (own != 0 && cmpsType > 0)
+    static if (own != 0)
     {
         pragma(inline, true)
         @system protected void clean() @nogc nothrow
