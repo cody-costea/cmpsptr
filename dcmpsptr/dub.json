@@ -1,0 +1,6 @@
+{
+    "name": "dcmpsptr",
+    "targetName": "dcmpsptr",
+    "targetType": "executable",
+    "targetPath": "bin"
+}
