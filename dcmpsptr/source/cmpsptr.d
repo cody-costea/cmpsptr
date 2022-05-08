@@ -27,34 +27,30 @@ The following negative values can also be used, but they are not safe and will l
 enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 4;
 
 enum nil = null;
-alias S8 = byte;
+alias I8 = byte;
 alias U8 = ubyte;
 alias Bit = bool;
 alias SBt = byte;
 alias UBt = ubyte;
-alias Idx = ubyte;
-alias Dec = float;
 alias Vct = Array;
-alias Flt = float;
-alias SSr = short;
-alias S16 = short;
+alias F32 = float;
+alias I16 = short;
 alias U16 = ushort;
-alias USr = ushort;
-alias Dbl = double;
 alias ZNr = size_t;
-alias DNr = ptrdiff_t;
 alias PNr = uintptr_t;
 alias Str = const(char)*;
+alias DNr = ptrdiff_t;
+alias F64 = double;
 alias Txt = char*;
 alias U64 = ulong;
-alias ULn = ulong;
-alias SLn = long;
-alias S64 = long;
+alias I64 = long;
 alias Chr = char;
-alias UNr = uint;
 alias U32 = uint;
-alias S32 = int;
-alias SNr = int;
+alias I32 = int;
+alias UNr = U32;
+alias SNr = I32;
+alias Dec = F32;
+alias Idx = U8;
 alias Nr = SNr;
 
 //static if (COMPRESS_POINTERS > 0)
@@ -496,18 +492,28 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 this.increase;
             }
         }
+
+        @system void opAssign(ref return scope CmpsPtr copy)
+        {
+            this.copy(copy);
+        }
+
+        @system this(ref return scope CmpsPtr copy) //@nogc nothrow
+        {
+            this.copy(copy);
+        }
     }
     else static if (own < 0)
     {   
         @disable this(ref return scope CmpsPtr copy);
     }
-    else
+    /*else
     {
         @system void copy(ref return scope CmpsPtr copy) //@nogc nothrow
         {
             this._ptr = copy._ptr;
         }
-    }
+    }*/
        
     @system void copy(T* ptr)
     {
@@ -523,14 +529,14 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         this.copy(ptr);
     }
 
-    static if (own > -1)
-    {
+    //static if (own == 0)
+    //{
         @system void opAssign(T* ptr)
         {
             this.copy(ptr);
         }
 
-        @system void opAssign(ref return scope CmpsPtr copy)
+        /*@system void opAssign(ref return scope CmpsPtr copy)
         {
             this.copy(copy);
         }
@@ -538,8 +544,8 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         @system this(ref return scope CmpsPtr copy) //@nogc nothrow
         {
             this.copy(copy);
-        }
-    }
+        }*/
+    //}
 
     @disable this();
 }
@@ -585,7 +591,7 @@ pragma(inline, true)
 
 alias Ptr = CmpsPtr;
 
-struct IdxHndl(string array, string arrayModule = "", U = UNr)
+struct IdxHndl(string array, string arrayModule = "", U = Idx)
 {
     static if (arrayModule.length > 0 && arrayModule != "cmpsptr")
     {
@@ -608,7 +614,7 @@ struct IdxHndl(string array, string arrayModule = "", U = UNr)
                     }
                 }
             });
-            this._idx = -1;
+            this._idx = cast(U)-1;
         }
 
         pragma(inline, true):
@@ -617,10 +623,10 @@ struct IdxHndl(string array, string arrayModule = "", U = UNr)
             this._idx = idx;
         }
         
-        @safe void copy(ref return scope IdxHndl copy) @nogc nothrow
+        /*@safe void copy(ref return scope IdxHndl copy) @nogc nothrow
         {
             this._idx = copy._idx;
-        }
+        }*/
 
         public:
         @safe ref T obj() @nogc nothrow
@@ -654,10 +660,10 @@ struct IdxHndl(string array, string arrayModule = "", U = UNr)
             this._ptr = ptr;
         }
         
-        @safe void copy(ref return scope IdxHndl copy) @nogc nothrow
+        /*@safe void copy(ref return scope IdxHndl copy) @nogc nothrow
         {
             this._ptr = copy._ptr;
-        }
+        }*/
 
         public:
         @safe ref T obj() @nogc nothrow
@@ -681,9 +687,15 @@ struct IdxHndl(string array, string arrayModule = "", U = UNr)
                     }
                 }
             });
-            return -1;
+            return cast(U)-1;
         }
     }
+
+    /*void copy(ref T obj) @nogc nothrow
+    {
+        this.copy(&obj);
+    }*/
+
     public:
     @safe void opAssign(U idx) @nogc nothrow
     {
@@ -695,7 +707,7 @@ struct IdxHndl(string array, string arrayModule = "", U = UNr)
         this.copy(ptr);
     }
 
-    @safe void opAssign(ref return scope IdxHndl copy) @nogc nothrow
+    /*@safe void opAssign(ref return scope IdxHndl copy) @nogc nothrow
     {
         this.copy(ptr);
     }
@@ -703,7 +715,7 @@ struct IdxHndl(string array, string arrayModule = "", U = UNr)
     @system void opAssign(ref T obj) @nogc nothrow
     {
         this.copy(obj);
-    }
+    }*/
 
     @safe this(U idx) @nogc nothrow
     {
@@ -715,7 +727,7 @@ struct IdxHndl(string array, string arrayModule = "", U = UNr)
         this.copy(ptr);
     }
 
-    @safe this(ref return scope IdxHndl copy) @nogc nothrow
+    /*@safe this(ref return scope IdxHndl copy) @nogc nothrow
     {
         this.copy(ptr);
     }
@@ -723,7 +735,7 @@ struct IdxHndl(string array, string arrayModule = "", U = UNr)
     @system this(ref T obj) @nogc nothrow
     {
         this.copy(obj);
-    }
+    }*/
 
     @disable this();
     

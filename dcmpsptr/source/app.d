@@ -23,6 +23,11 @@ void testFunc(Ptr!(Test, 1) tst, const UNr again)
     }
 }
 
+void testHndlFunc(Hnl!("APP.Test.testArr", "APP") tst)
+{
+    printf("tst.index = %d\n", (tst.index));
+}
+
 extern (C) int main(string[] args) {        
     Test* ptr = alloc!Test;
     ptr.x = 7;
@@ -36,6 +41,7 @@ extern (C) int main(string[] args) {
     printf("tst.x = %d\n", tst.x);
     printf("tst.sizeof = %d\n", tst.sizeof);
     Hnl!("APP.Test.testArr", "APP") testArr = 2;
+    testHndlFunc(testArr);
     SNr testArrElm = testArr;
     printf("testArr = %d\n", testArrElm);
     //printf("tst.count = %d\n", (tst.refCount));
