@@ -4,7 +4,7 @@ import cmpsptr;
 
 struct Test
 {
-    public static SNr[3] testArr = [9, 8, 7];
+    public static const SNr[3] testArr = [9, 8, 7];
 
     SNr x = 3;
 
@@ -25,7 +25,8 @@ void testFunc(Ptr!(Test, 1) tst, const UNr again)
 
 void testHndlFunc(Hnl!("APP.Test.testArr", "APP") tst)
 {
-    printf("tst.index = %d\n", (tst.index));
+    printf("APP.Test.testArr.index = %d\n", (tst.index));
+    printf("APP.Test.testArr.sizeof = %d\n", (tst.sizeof));
 }
 
 extern (C) int main(string[] args) {        
@@ -40,7 +41,8 @@ extern (C) int main(string[] args) {
     tst.x = 1;
     printf("tst.x = %d\n", tst.x);
     printf("tst.sizeof = %d\n", tst.sizeof);
-    Hnl!("APP.Test.testArr", "APP") testArr = 2;
+    //Hnl!("APP.Test.testArr", "APP") testArr = 2;
+    Hnl!("APP.Test.testArr", "APP") testArr = &(APP.Test.testArr[2]);
     testHndlFunc(testArr);
     SNr testArrElm = testArr;
     printf("testArr = %d\n", testArrElm);

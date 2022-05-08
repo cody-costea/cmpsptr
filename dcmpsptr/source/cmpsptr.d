@@ -599,25 +599,55 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
     }
     private:
     alias T = mixin("typeof(" ~ array ~ "[0])");
+    @safe static U findIdx(T* ptr) @nogc nothrow
+    {
+        mixin("auto arr = &" ~ array ~ q{;
+               import std.traits;
+               static if (isArray!(typeof(*arr)))
+               {
+                   enum objSize = T.sizeof;
+                   auto idPtr = cast(PNr)ptr;
+                   auto arPtr = cast(PNr)arr.ptr;
+                   if (idPtr >= arPtr && idPtr < arPtr + (arr.length * objSize))
+                   {
+                       return cast(U)((idPtr - arPtr) / objSize);
+                   }
+               }
+               else
+               {
+                   const auto arrLn = arr.length;
+                   for (U i = 0; i < arrLn; ++i)
+                   {
+                       if (&((*arr)[i]) == ptr)
+                       {
+                           return i;
+                       }
+                   }
+               }
+        });
+        return cast(U)-1;
+    }
+
+    pragma(inline, true):
     static if (U.sizeof < (void*).sizeof)
     {
         U _idx = void;
 
         @safe void copy(T* ptr) @nogc nothrow
         {
-            mixin("auto arr = " ~ array ~ q{;
-                for (U i = 0; i < arr.length; ++i)
-                {
-                    if (&(arr[i]) == ptr)
-                    {
-                        this._idx = i;
-                    }
-                }
-            });
-            this._idx = cast(U)-1;
+            /*import std.traits;
+            mixin("auto arr = &" ~ array ~ ";");
+            static if (isStaticArray!(typeof(*arr)))
+            {
+                enum i = findIdx(ptr);
+                this._idx = i;
+            }
+            else
+            {*/
+                this._idx = this.findIdx(ptr);
+            //}
         }
 
-        pragma(inline, true):
         @safe void copy(U idx) @nogc nothrow
         {
             this._idx = idx;
@@ -649,7 +679,6 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
         private:
         T* _ptr = void;
         
-        pragma(inline, true):        
         @safe void copy(U idx) @nogc nothrow
         {
             mixin("this._ptr = &(" ~ array ~ "[idx]);");
@@ -678,16 +707,7 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
 
         @system U index() @nogc nothrow
         {
-            mixin("auto arr = " ~ array ~ q{;
-                for (U i = 0; i < arr.length; ++i)
-                {
-                    if (&(arr[i]) == this._ptr)
-                    {
-                        return i;
-                    }
-                }
-            });
-            return cast(U)-1;
+            return findIdx(this._ptr);
         }
     }
 
