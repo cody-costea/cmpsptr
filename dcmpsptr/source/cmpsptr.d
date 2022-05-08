@@ -7,9 +7,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 module cmpsptr;
 import core.stdc.stdio;
-import core.stdc.stdlib;
 import core.stdc.stdint;
+import core.stdc.stdlib : free;
 import std.container.array : Array;
+import std.math.algebraic : abs;
 /*
 If the COMPRESS_POINTERS enum is set to a non-zero value, 64bit pointers will be compressed into 32bit integers, according to the following options:
     +4 can compress addresses up to 32GB, at the expense of the 4 lower tag bits, which can no longer be used for other purporses
@@ -24,14 +25,12 @@ The following negative values can also be used, but they are not safe and will l
     -2 can compress addresses up to 8GB, at the expense of the lower tag bit, which can no longer be used for other purporses
     -1 can compress addresses up to 4GB, leaving the 3 lower tag bits to be used for other purporses
 */
-enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 4;
+enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 3;
 
 enum nil = null;
 alias I8 = byte;
 alias U8 = ubyte;
 alias Bit = bool;
-alias SBt = byte;
-alias UBt = ubyte;
 alias Vct = Array;
 alias F32 = float;
 alias I16 = short;
@@ -50,8 +49,23 @@ alias I32 = int;
 alias UNr = U32;
 alias SNr = I32;
 alias Dec = F32;
-alias Idx = U8;
+alias Idx = U16;
+alias SBt = I8;
+alias UBt = U8;
 alias Nr = SNr;
+
+static if (COMPRESS_POINTERS > 3)
+{
+    enum ALIGN_PTR_BYTES = 1 << (COMPRESS_POINTERS); //- 1);
+}
+else static if (COMPRESS_POINTERS < -3)
+{
+    enum ALIGN_PTR_BYTES = 1 << (abs(COMPRESS_POINTERS + 1));
+}
+else
+{
+    enum ALIGN_PTR_BYTES = -1;
+}
 
 //static if (COMPRESS_POINTERS > 0)
 //{
@@ -175,7 +189,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
     
     static if (own > 0)
     {
-        protected CmpsPtr!(ZNr, 0, cmpsType == 0 ? 0 : (cmpsType > 0 ? 4 : -5)) count = void;        
+        protected CmpsPtr!(ZNr, 0, COMPRESS_POINTERS) count = void;        
 
         pragma(inline, true)
         {
@@ -231,7 +245,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
     }
     else static if (cmpsType > 0)
     {
-        enum SHIFT_LEN = cmpsType > 3 ? 3 : (cmpsType - 1);
+        enum SHIFT_LEN = cmpsType - 1;
         private UNr _ptr = 0U;
 
         @system private static Bit clearList(UNr ptr)
@@ -405,7 +419,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
     {
         private UNr _ptr = void;
      
-        enum SHIFT_LEN = cmpsType < -4 ? 4 : -(cmpsType + 1);
+        enum SHIFT_LEN = -1 * (cmpsType + 1);
 
         pragma(inline, true)
         {
@@ -549,12 +563,49 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
 
     @disable this();
 }
+enum USE_GC_ALLOC = ALIGN_PTR_BYTES < -1  && COMPRESS_POINTERS > -1 && COMPRESS_POINTERS < 2;
+
+static if (USE_GC_ALLOC)
+{
+    import core.memory : GC;
+}
+else static if (ALIGN_PTR_BYTES > -1)
+{
+    version (Windows)
+    {
+        //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)    
+        @nogc nothrow private extern(C) void* _aligned_malloc(size_t, size_t);
+        @nogc nothrow private extern(C) void _aligned_free(void* memblock);
+    }
+}
 
 pragma(inline, true)
 {
-    @system T* alloc(T)(const SNr qty = 1) @nogc nothrow
+    @trusted T* alloc(T)(const SNr qty = 1) //@nogc nothrow
     {
-        return cast(T*)malloc(T.sizeof * qty);
+        static if (USE_GC_ALLOC)
+        {
+            return cast(T*)GC.malloc(T.sizeof * qty);
+        }
+        else static if (ALIGN_PTR_BYTES < 0)
+        {
+            import core.stdc.stdlib : malloc;
+            return cast(T*)malloc(T.sizeof * qty);
+        }
+        else
+        {
+            //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)
+            version (Posix)
+            {
+                void* ptr;
+                import core.sys.posix.stdlib : posix_memalign;
+                reurn (posix_memalign(&ptr, ALIGN_PTR_BYTES, T.sizeof * qty)) ? nil : cast(T*)ptr;
+            }
+            else version(Windows)
+            {
+                return cast(T*)_aligned_malloc(ALIGN_PTR_BYTES, T.sizeof * qty);
+            }
+        }
     }
 
     @system void clear(T, const Bit check = false)(T** ptr) @nogc nothrow
@@ -580,7 +631,29 @@ pragma(inline, true)
             if (ptr == nil) return;
         }
         (*ptr).destroy;
-        ptr.free;
+        static if (USE_GC_ALLOC)
+        {
+            GC.free(ptr);
+        }
+        else
+        {
+            //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)
+            version(Windows)
+            {
+                static if (ALIGN_PTR_BYTES > -1)
+                {
+                    ptr._aligned_free;
+                }
+                else
+                {
+                    ptr.free;
+                }
+            }
+            else
+            {
+                ptr.free;
+            }
+        }
     }
 
     @system void erase(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
