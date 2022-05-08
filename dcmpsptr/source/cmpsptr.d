@@ -270,12 +270,12 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         {
             public
             {
-                @safe Bit compressed() @nogc nothrow
+                @safe Bit compressed() const @nogc nothrow
                 {
                     return (this._ptr & 1U) != 1U;
                 }
 
-                @system T* ptr() @nogc nothrow
+                @system T* ptr() const @nogc nothrow
                 {
                     const UNr ptr = this._ptr;
                     if (ptr == 0U)
@@ -414,12 +414,12 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         pragma(inline, true)
         {
             public:
-            @safe Bit compressed() @nogc nothrow
+            @safe Bit compressed() const @nogc nothrow
             {
                 return true;
             }
             
-            @system T* ptr() @nogc nothrow
+            @system T* ptr() const @nogc nothrow
             {
                 /*UNr ptr = this._ptr;
                 if (ptr == 0U)
@@ -558,30 +558,90 @@ pragma(inline, true)
 
 alias Ptr = CmpsPtr;
 
-struct IdxHndl(T, string array, U = UNr)
+struct IdxHndl(string array, string arrayModule = "", U = UNr)
 {
-    private U _idx = void;
-
-    public:
-    pragma(inline, true)
+    static if (arrayModule.length > 0 && arrayModule != "cmpsptr")
     {
-        @system ref T obj() @nogc nothrow
-        {
-            mixin("return " ~ array ~ "[this._idx];");
-        }
-        
-        @safe this(U idx) @nogc nothrow
-        {
-            this._idx = idx;
-        }
-        
-        /*@safe this(ref return scope IdxHndl copy) @nogc nothrow
-        {
-            this._idx = copy.idx;
-        }*/
-
-        @disable this();
+        mixin("import " ~ arrayModule ~";");
     }
+    alias T = mixin("typeof(" ~ array ~ "[0])");
+    static if (U.sizeof < (void*).sizeof)
+    {
+        private U _idx = void;
+
+        public:
+        pragma(inline, true)
+        {
+            @safe ref T obj() @nogc nothrow
+            {
+                mixin("return " ~ array ~ "[this._idx];");
+            }
+            
+            @safe T* ptr() @nogc nothrow
+            {
+                mixin("return &(" ~ array ~ "[this._idx]);");
+            }
+
+            @system U index() @nogc nothrow
+            {
+                return this._idx;
+            }
+            
+            @safe this(U idx) @nogc nothrow
+            {
+                this._idx = idx;
+            }
+            
+            @safe this(ref return scope IdxHndl copy) @nogc nothrow
+            {
+                this._idx = copy._idx;
+            }
+        }
+    }
+    else
+    {
+        private T* _ptr = void;
+        
+        public:
+        pragma(inline, true)
+        {
+            @safe ref T obj() @nogc nothrow
+            {
+                return *this._ptr;
+            }
+            
+            @safe T* ptr() @nogc nothrow
+            {
+                return this._ptr;
+            }
+
+            @system U index() @nogc nothrow
+            {
+                mixin("auto arr = " ~ array ~ q{;
+                    for (U i = 0; i < arr.length; ++i)
+                    {
+                        if (&(arr[i]) == this._ptr)
+                        {
+                            return i;
+                        }
+                    }
+                });
+                return 0;
+            }
+            
+            @safe this(U idx) @nogc nothrow
+            {
+                mixin("this._ptr = &(" ~ array ~ "[idx]);");
+            }
+            
+            @safe this(ref return scope IdxHndl copy) @nogc nothrow
+            {
+                this._ptr = copy._ptr;
+            }
+        }
+    }
+
+    @disable this();
     
     alias obj this;
 }
