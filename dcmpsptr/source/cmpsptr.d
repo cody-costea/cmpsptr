@@ -463,9 +463,9 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
             }
         }
         
+        pragma(inline, true):
         static if (own < 0)
         {
-            pragma(inline, true):
             @system ~this() //@nogc nothrow
             {
                 this.clean;
@@ -473,7 +473,6 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         }
         else static if (own > 0)
         {
-            pragma(inline, true)
             @system ~this() //@nogc nothrow
             {
                 this.decrease;
@@ -482,13 +481,12 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
     }
     
     alias ptr this;
-
+    pragma(inline, true):
     static if (own > 0)
     {
         @disable this(this);
         
-        pragma(inline, true)
-        @system this(ref return scope CmpsPtr copy) //@nogc nothrow
+        @system void copy(ref return scope CmpsPtr copy) //@nogc nothrow
         {
             //this.count = nil;
             this.ptr = copy.ptr;
@@ -500,14 +498,18 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         }
     }
     else static if (own < 0)
-    {
-        @disable this(this);
-        
+    {   
         @disable this(ref return scope CmpsPtr copy);
     }
-            
-    pragma(inline, true)
-    @system this(T* ptr)
+    else
+    {
+        @system void copy(ref return scope CmpsPtr copy) //@nogc nothrow
+        {
+            this._ptr = copy._ptr;
+        }
+    }
+       
+    @system void copy(T* ptr)
     {
         static if (own > 0)
         {
@@ -515,6 +517,31 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         }
         this.ptr = ptr;
     }
+
+    @system this(T* ptr)
+    {
+        this.copy(ptr);
+    }
+
+    static if (own > -1)
+    {
+        @system void opAssign(T* ptr)
+        {
+            this.copy(ptr);
+        }
+
+        @system void opAssign(ref return scope CmpsPtr copy)
+        {
+            this.copy(copy);
+        }
+
+        @system this(ref return scope CmpsPtr copy) //@nogc nothrow
+        {
+            this.copy(copy);
+        }
+    }
+
+    @disable this();
 }
 
 pragma(inline, true)
@@ -564,81 +591,138 @@ struct IdxHndl(string array, string arrayModule = "", U = UNr)
     {
         mixin("import " ~ arrayModule ~";");
     }
+    private:
     alias T = mixin("typeof(" ~ array ~ "[0])");
     static if (U.sizeof < (void*).sizeof)
     {
-        private U _idx = void;
+        U _idx = void;
+
+        @safe void copy(T* ptr) @nogc nothrow
+        {
+            mixin("auto arr = " ~ array ~ q{;
+                for (U i = 0; i < arr.length; ++i)
+                {
+                    if (&(arr[i]) == ptr)
+                    {
+                        this._idx = i;
+                    }
+                }
+            });
+            this._idx = -1;
+        }
+
+        pragma(inline, true):
+        @safe void copy(U idx) @nogc nothrow
+        {
+            this._idx = idx;
+        }
+        
+        @safe void copy(ref return scope IdxHndl copy) @nogc nothrow
+        {
+            this._idx = copy._idx;
+        }
 
         public:
-        pragma(inline, true)
+        @safe ref T obj() @nogc nothrow
         {
-            @safe ref T obj() @nogc nothrow
-            {
-                mixin("return " ~ array ~ "[this._idx];");
-            }
-            
-            @safe T* ptr() @nogc nothrow
-            {
-                mixin("return &(" ~ array ~ "[this._idx]);");
-            }
+            mixin("return " ~ array ~ "[this._idx];");
+        }
 
-            @system U index() @nogc nothrow
-            {
-                return this._idx;
-            }
-            
-            @safe this(U idx) @nogc nothrow
-            {
-                this._idx = idx;
-            }
-            
-            @safe this(ref return scope IdxHndl copy) @nogc nothrow
-            {
-                this._idx = copy._idx;
-            }
+        @safe T* ptr() @nogc nothrow
+        {
+            mixin("return &(" ~ array ~ "[this._idx]);");
+        }
+
+        @system U index() @nogc nothrow
+        {
+            return this._idx;
         }
     }
     else
     {
-        private T* _ptr = void;
+        private:
+        T* _ptr = void;
         
-        public:
-        pragma(inline, true)
+        pragma(inline, true):        
+        @safe void copy(U idx) @nogc nothrow
         {
-            @safe ref T obj() @nogc nothrow
-            {
-                return *this._ptr;
-            }
-            
-            @safe T* ptr() @nogc nothrow
-            {
-                return this._ptr;
-            }
-
-            @system U index() @nogc nothrow
-            {
-                mixin("auto arr = " ~ array ~ q{;
-                    for (U i = 0; i < arr.length; ++i)
-                    {
-                        if (&(arr[i]) == this._ptr)
-                        {
-                            return i;
-                        }
-                    }
-                });
-                return 0;
-            }
-            
-            @safe this(U idx) @nogc nothrow
-            {
-                mixin("this._ptr = &(" ~ array ~ "[idx]);");
-            }
-            
-            @safe this(ref return scope IdxHndl copy) @nogc nothrow
-            {
-                this._ptr = copy._ptr;
-            }
+            mixin("this._ptr = &(" ~ array ~ "[idx]);");
         }
+        
+        @safe void copy(T* ptr) @nogc nothrow
+        {
+            this._ptr = ptr;
+        }
+        
+        @safe void copy(ref return scope IdxHndl copy) @nogc nothrow
+        {
+            this._ptr = copy._ptr;
+        }
+
+        public:
+        @safe ref T obj() @nogc nothrow
+        {
+            return *this._ptr;
+        }
+        
+        @safe T* ptr() @nogc nothrow
+        {
+            return this._ptr;
+        }
+
+        @system U index() @nogc nothrow
+        {
+            mixin("auto arr = " ~ array ~ q{;
+                for (U i = 0; i < arr.length; ++i)
+                {
+                    if (&(arr[i]) == this._ptr)
+                    {
+                        return i;
+                    }
+                }
+            });
+            return -1;
+        }
+    }
+    public:
+    @safe void opAssign(U idx) @nogc nothrow
+    {
+        this.copy(idx);
+    }
+
+    @safe void opAssign(T* ptr) @nogc nothrow
+    {
+        this.copy(ptr);
+    }
+
+    @safe void opAssign(ref return scope IdxHndl copy) @nogc nothrow
+    {
+        this.copy(ptr);
+    }
+
+    @system void opAssign(ref T obj) @nogc nothrow
+    {
+        this.copy(obj);
+    }
+
+    @safe this(U idx) @nogc nothrow
+    {
+        this.copy(idx);
+    }
+
+    @safe this(T* ptr) @nogc nothrow
+    {
+        this.copy(ptr);
+    }
+
+    @safe this(ref return scope IdxHndl copy) @nogc nothrow
+    {
+        this.copy(ptr);
+    }
+
+    @system this(ref T obj) @nogc nothrow
+    {
+        this.copy(obj);
     }
 
     @disable this();
