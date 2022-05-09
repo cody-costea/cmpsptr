@@ -26,7 +26,7 @@ The following negative values can also be used, but they are not safe and will l
     -2 can compress addresses up to 8GB, at the expense of the lower tag bit, which can no longer be used for other purporses
     -1 can compress addresses up to 4GB, leaving the 3 lower tag bits to be used for other purporses
 */
-enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 4;
+enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 5;
 
 enum nil = null;
 alias I8 = byte;
@@ -55,11 +55,11 @@ alias SBt = I8;
 alias UBt = U8;
 alias Nr = SNr;
 
-static if (COMPRESS_POINTERS > 4)
+static if (COMPRESS_POINTERS > 5)
 {
-    enum ALIGN_PTR_BYTES = 1 << (COMPRESS_POINTERS- 1);
+    enum ALIGN_PTR_BYTES = 1 << (COMPRESS_POINTERS - 1);
 }
-else static if (COMPRESS_POINTERS < -4)
+else static if (COMPRESS_POINTERS < -5)
 {
     enum ALIGN_PTR_BYTES = 1 << (abs(COMPRESS_POINTERS + 1));
 }
@@ -68,107 +68,10 @@ else
     enum ALIGN_PTR_BYTES = -1;
 }
 
-//static if (COMPRESS_POINTERS > 0)
-//{
-    private Vct!(void*) _ptrList; //TODO: multiple thread shared access safety and analyze better solutions
-//}
-
-/*private
+static if (COMPRESS_POINTERS > 0)
 {
-    void* ptr(UNr ptr)
-    {
-        if (ptr == 0U)
-        {
-            return nil;
-        }
-        //PNr ptrNr = void;
-        else if ((ptr & 1U) == 1U)
-        {
-            return cast(void*)_ptrList[(ptr >>> 1) - 1U];
-        }
-        else
-        {
-            //ptrNr = (cast(PNr)ptr) << SHIFT_LEN;
-            return cast(void*)((cast(PNr)ptr) << SHIFT_LEN);
-        }
-        //return cast(void*)((ptrNr & ((1UL << 48) - 1UL)) | ~((ptrNr & (1UL << 47)) - 1UL));
-    }
-
-    UNr listPtr(void* ptr)
-    {
-        UNr oldPtr = this._ptr;
-        auto ptrList = &_ptrList;
-        if ((oldPtr & 1U) == 1U)
-        {
-            oldPtr >>>= 1;
-            if (oldPtr > 0U)
-            {
-                (*ptrList)[oldPtr - 1U] = ptr;
-                return;
-            }
-        }
-        ZNr ptrLength = ptrList.length;
-        for (UNr i = 0; i < ptrLength; i += 1U)
-        {
-            if ((*ptrList)[i] == nil)
-            {
-                (*ptrList)[i] = ptr;
-                this._ptr = (i << 1U) | 1U;
-                return;
-            }
-        }
-        ptrList.insert(ptr);
-        return cast(UNr)(((ptrLength + 1) << 1) | 1);
-    }
-
-    void ptr(void* ptr)
-    {
-        static if (own == 0)
-        {
-            if (this.ptr == ptr)
-            {
-                return;
-            }
-            if (ptr == nil)
-            {
-                if (clearList(this._ptr)) this._ptr = 0U;
-                return;
-            }
-        }
-        else
-        {
-            if (ptr && ptr != this.ptr)
-            {
-                static if (own > 0)
-                {
-                    this.decrease;
-                    this.reset;
-                }
-                else
-                {
-                    this.clean;
-                }
-            }
-            else
-            {
-                return;
-            }
-        }
-        PNr ptrNr = cast(PNr)ptr; //<< 16) >>> 16;
-        if (ptrNr < (4294967296UL << SHIFT_LEN))
-        {
-            static if (own < 0)
-            {
-                clearList(this._ptr);
-            }
-            this._ptr = cast(UNr)(ptrNr >>> SHIFT_LEN);
-        }
-        else
-        {
-            this.listPtr(ptr);
-        }
-    }
-}*/
+    private Vct!(void*) _ptrList; //TODO: multiple thread shared access safety and analyze better solutions
+}
 
 struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
 {
@@ -178,8 +81,6 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         @system protected void clean()
         {
             this.ptr.erase;
-            //T* ptr = this.ptr;
-            //(&(ptr)).clear;
             static if (cmpsType > 0)
             {
                 clearList(this._ptr);
@@ -242,11 +143,22 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
     
     static if (cmpsType == 0)
     {
-        public T* ptr = void;
+        public
+        {
+            T* ptr = void;
+            pragma(inline, true)
+            {
+                @safe Bit compressed() const @nogc nothrow
+                {
+                    return false;
+                }
+            }
+        }
     }
     else static if (cmpsType > 0)
     {
         enum SHIFT_LEN = cmpsType - 2;
+        enum ONLY_LIST = SHIFT_LEN < 0;
         private UNr _ptr = 0U;
 
         @system private static Bit clearList(UNr ptr)
@@ -255,11 +167,10 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
             {
                 return false;
             }
-            enum onlyList = SHIFT_LEN < 0;
-            if (onlyList || (ptr & 1U) == 1U)
+            if (ONLY_LIST || (ptr & 1U) == 1U)
             {
                 auto ptrList = &_ptrList;
-                static if (!onlyList)
+                static if (!ONLY_LIST)
                 {
                     ptr >>>= 1;
                 }
@@ -286,7 +197,14 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
             {
                 @safe Bit compressed() const @nogc nothrow
                 {
-                    return (this._ptr & 1U) != 1U;
+                    static if (ONLY_LIST)
+                    {
+                        return false;
+                    }
+                    else
+                    {
+                        return (this._ptr & 1U) != 1U;
+                    }
                 }
 
                 @trusted T* ptr() const @nogc nothrow
@@ -299,7 +217,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                     //PNr ptrNr = void;
                     else 
                     {
-                        static if (SHIFT_LEN < 0)
+                        static if (ONLY_LIST)
                         {
                             return cast(T*)_ptrList[ptr - 1U];
                         }
@@ -325,10 +243,9 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         {
             UNr oldPtr = this._ptr;
             auto ptrList = &_ptrList;
-            enum onlyList = SHIFT_LEN < 0;
-            if (onlyList || (oldPtr & 1U) == 1U)
+            if (ONLY_LIST || (oldPtr & 1U) == 1U)
             {
-                static if (!onlyList)
+                static if (!ONLY_LIST)
                 {
                     oldPtr >>>= 1;
                 }
@@ -344,7 +261,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 if ((*ptrList)[i] == nil)
                 {
                     (*ptrList)[i] = ptr;
-                    static if (onlyList)
+                    static if (ONLY_LIST)
                     {
                         this._ptr = i;
                     }
@@ -356,7 +273,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 }
             }
             ptrList.insert(ptr);
-            static if (onlyList)
+            static if (ONLY_LIST)
             {
                 this._ptr = cast(UNr)(ptrLength + 1);
             }
@@ -444,7 +361,6 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
             {
                 static if (own < 1)
                 {
-                    //this._ptr.clearList;
                     clearList(this._ptr);
                 }
                 else
@@ -458,7 +374,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
     {
         private UNr _ptr = void;
      
-        enum SHIFT_LEN = -1 * (cmpsType + 1);
+        enum SHIFT_LEN = -(cmpsType + 1);
 
         pragma(inline, true)
         {
@@ -480,9 +396,6 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                     PNr ptrNr = (cast(PNr)ptr) << SHIFT_LEN;
                     return cast(T*)((ptrNr & ((1UL << 48) - 1UL)) | ~((ptrNr & (1UL << 47)) - 1UL));
                 }*/
-                //printf("this._ptr = %d\n", this._ptr);
-                //printf("SHIFT_LEN = %d\n", SHIFT_LEN);
-                //printf("%d << %d = %d\n", this._ptr, SHIFT_LEN, ((cast(PNr)this._ptr) << SHIFT_LEN));
                 return cast(T*)((cast(PNr)this._ptr) << SHIFT_LEN);
             }
             
@@ -699,6 +612,14 @@ pragma(inline, true)
     {
         ptr.ptr.erase!(T, check);
     }
+}
+
+@trusted T* allocNew(T, Args...)(auto ref Args args)
+{
+    import core.lifetime : emplace;
+    T* newInstance = alloc!T(1);
+    emplace!T(newInstance, args);
+    return newInstance;
 }
 
 alias Ptr = CmpsPtr;

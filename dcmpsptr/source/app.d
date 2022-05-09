@@ -8,8 +8,13 @@ struct Test
 
     SNr x = 3;
 
+    this(const SNr x)
+    {
+        this.x = x;
+    }
+
     ~this()
-    {        
+    {
         printf("test destructor!\n");
     }
 }
@@ -30,7 +35,7 @@ void testHndlFunc(Hnl!("APP.Test.testArr", "APP") tst)
 }
 
 extern (C) int main(string[] args) {        
-    Test* ptr = alloc!Test;
+    Test* ptr = allocNew!Test(5);
     ptr.x = 7;
     printf("ptr.x = %d\n", ptr.x);
     printf("ptr.sizeof = %d\n", ptr.sizeof);
