@@ -615,7 +615,7 @@ namespace cmpsptr
             {
                 uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
                 //if (addr < 1073741824UL * (2 << SHIFT_LEN))
-                if ((4294967296UL << SHIFT_LEN) > addr)
+                if ((4294967295UL << SHIFT_LEN) > addr)
                 //if (addr < (10000UL))
                 {
                     //if constexpr(own)
@@ -720,7 +720,7 @@ namespace cmpsptr
         inline void setAddr(T* const ptr)
         {
             //uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
-            //assert(addr < (4294967296UL << SHIFT_LEN));
+            //assert(addr < (4294967295UL << SHIFT_LEN));
             this->_ptr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr) >> SHIFT_LEN);
         }
 

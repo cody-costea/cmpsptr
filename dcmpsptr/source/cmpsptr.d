@@ -13,10 +13,11 @@ import std.container.array : Array;
 import std.math.algebraic : abs;
 /*
 If the COMPRESS_POINTERS enum is set to a non-zero value, 64bit pointers will be compressed into 32bit integers, according to the following options:
-    +4 can compress addresses up to 32GB, at the expense of the 4 lower tag bits, which can no longer be used for other purporses
-    +3 can compress addresses up to 16GB, at the expense of the 3 lower tag bits, which can no longer be used for other purporses
-    +2 can compress addresses up to 8GB, at the expense of the 2 lower tag bits, which can no longer be used for other purporses
-    +1 can compress addresses up to 4GB, at the expense of the lower tag bit, which can no longer be used for other purporses
+    +5 can compress addresses up to 32GB, at the expense of the 4 lower tag bits, which can no longer be used for other purporses
+    +4 can compress addresses up to 16GB, at the expense of the 3 lower tag bits, which can no longer be used for other purporses
+    +3 can compress addresses up to 8GB, at the expense of the 2 lower tag bits, which can no longer be used for other purporses
+    +2 can compress addresses up to 4GB, at the expense of the lower tag bit, which can no longer be used for other purporses
+    +1 always stores the pointer in a vector, returning its index, thus preserving its full form (including higher bits)
 Attempting to compress an address higher than the mentioned limits, will lead however to increased CPU and RAM usage and cannot be shared between threads;
 The following negative values can also be used, but they are not safe and will lead to crashes, when the memory limits are exceeded:
     -5 can compress addresses up to 64GB, at the expense of the 4 lower tag bits, which can no longer be used for other purporses
@@ -25,7 +26,7 @@ The following negative values can also be used, but they are not safe and will l
     -2 can compress addresses up to 8GB, at the expense of the lower tag bit, which can no longer be used for other purporses
     -1 can compress addresses up to 4GB, leaving the 3 lower tag bits to be used for other purporses
 */
-enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 3;
+enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 4;
 
 enum nil = null;
 alias I8 = byte;
@@ -54,11 +55,11 @@ alias SBt = I8;
 alias UBt = U8;
 alias Nr = SNr;
 
-static if (COMPRESS_POINTERS > 3)
+static if (COMPRESS_POINTERS > 4)
 {
-    enum ALIGN_PTR_BYTES = 1 << (COMPRESS_POINTERS); //- 1);
+    enum ALIGN_PTR_BYTES = 1 << (COMPRESS_POINTERS- 1);
 }
-else static if (COMPRESS_POINTERS < -3)
+else static if (COMPRESS_POINTERS < -4)
 {
     enum ALIGN_PTR_BYTES = 1 << (abs(COMPRESS_POINTERS + 1));
 }
@@ -204,7 +205,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 {
                     ZNr* countPtr = alloc!ZNr;
                     (*countPtr) = 0;
-                    this.count.ptr(countPtr);
+                    this.count.ptr = countPtr;
                 }
                 
                 @system void increase() //@nogc nothrow 
@@ -245,7 +246,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
     }
     else static if (cmpsType > 0)
     {
-        enum SHIFT_LEN = cmpsType - 1;
+        enum SHIFT_LEN = cmpsType - 2;
         private UNr _ptr = 0U;
 
         @system private static Bit clearList(UNr ptr)
@@ -254,11 +255,14 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
             {
                 return false;
             }
-            if ((ptr & 1U) == 1U)
+            enum onlyList = SHIFT_LEN < 0;
+            if (onlyList || (ptr & 1U) == 1U)
             {
                 auto ptrList = &_ptrList;
-                ptr >>>= 1;
-                
+                static if (!onlyList)
+                {
+                    ptr >>>= 1;
+                }
                 if (ptr == ptrList.length)
                 {
                     ZNr ptrListLen = void;
@@ -285,7 +289,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                     return (this._ptr & 1U) != 1U;
                 }
 
-                @system T* ptr() const @nogc nothrow
+                @trusted T* ptr() const @nogc nothrow
                 {
                     const UNr ptr = this._ptr;
                     if (ptr == 0U)
@@ -293,14 +297,24 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                         return nil;
                     }
                     //PNr ptrNr = void;
-                    else if ((ptr & 1U) == 1U)
+                    else 
                     {
-                        return cast(T*)_ptrList[(ptr >>> 1) - 1U];
-                    }
-                    else
-                    {
-                        //ptrNr = (cast(PNr)ptr) << SHIFT_LEN;
-                        return cast(T*)((cast(PNr)ptr) << SHIFT_LEN);
+                        static if (SHIFT_LEN < 0)
+                        {
+                            return cast(T*)_ptrList[ptr - 1U];
+                        }
+                        else
+                        {
+                            if ((ptr & 1U) == 1U)
+                            {
+                                return cast(T*)_ptrList[(ptr >>> 1) - 1U];
+                            }
+                            else
+                            {
+                                //ptrNr = (cast(PNr)ptr) << SHIFT_LEN;
+                                return cast(T*)((cast(PNr)ptr) << SHIFT_LEN);
+                            }
+                        }
                     }
                     //return cast(T*)((ptrNr & ((1UL << 48) - 1UL)) | ~((ptrNr & (1UL << 47)) - 1UL));
                 }
@@ -311,9 +325,13 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         {
             UNr oldPtr = this._ptr;
             auto ptrList = &_ptrList;
-            if ((oldPtr & 1U) == 1U)
+            enum onlyList = SHIFT_LEN < 0;
+            if (onlyList || (oldPtr & 1U) == 1U)
             {
-                oldPtr >>>= 1;
+                static if (!onlyList)
+                {
+                    oldPtr >>>= 1;
+                }
                 if (oldPtr > 0U)
                 {
                     (*ptrList)[oldPtr - 1U] = ptr;
@@ -326,12 +344,26 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 if ((*ptrList)[i] == nil)
                 {
                     (*ptrList)[i] = ptr;
-                    this._ptr = (i << 1U) | 1U;
+                    static if (onlyList)
+                    {
+                        this._ptr = i;
+                    }
+                    else
+                    {
+                        this._ptr = (i << 1U) | 1U;
+                    }
                     return;
                 }
             }
             ptrList.insert(ptr);
-            this._ptr = cast(UNr)(((ptrLength + 1) << 1) | 1);
+            static if (onlyList)
+            {
+                this._ptr = cast(UNr)(ptrLength + 1);
+            }
+            else
+            {
+                this._ptr = cast(UNr)(((ptrLength + 1) << 1) | 1);
+            }
         }
 
         pragma(inline, true)
@@ -368,18 +400,25 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                     return;
                 }
             }
-            const PNr ptrNr = cast(PNr)ptr; //<< 16) >>> 16;
-            if (ptrNr < (4294967295UL << SHIFT_LEN))
+            static if (SHIFT_LEN < 0)
             {
-                static if (own < 0)
-                {
-                    clearList(this._ptr);
-                }
-                this._ptr = cast(UNr)(ptrNr >>> SHIFT_LEN);
+                this.listPtr(ptr);
             }
             else
             {
-                this.listPtr(ptr);
+                const PNr ptrNr = cast(PNr)ptr; //<< 16) >>> 16;
+                if (ptrNr < (4294967295UL << SHIFT_LEN))
+                {
+                    static if (own < 0)
+                    {
+                        clearList(this._ptr);
+                    }
+                    this._ptr = cast(UNr)(ptrNr >>> SHIFT_LEN);
+                }
+                else
+                {
+                    this.listPtr(ptr);
+                }
             }
         }
         /*pragma(inline, true):
