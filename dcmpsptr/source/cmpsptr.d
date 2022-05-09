@@ -75,17 +75,31 @@ static if (COMPRESS_POINTERS > 0)
 
 struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
 {
-    static if (own != 0)
+    static if (own)
     {
         pragma(inline, true)
-        @system protected void clean()
         {
-            this.ptr.erase;
-            static if (cmpsType > 0)
+            @system protected void clean()
             {
-                clearList(this._ptr);
+                this.ptr.erase;
+                static if (cmpsType > 0)
+                {
+                    clearList(this._ptr);
+                }
+                //GC.removeRange(ptr);
             }
-            //GC.removeRange(ptr);
+
+            @trusted this(T* ptr) //@nogc nothrow
+            {
+                this.ptr!false(ptr);
+            }
+        }
+    }
+    else
+    {
+        @trusted this(T* ptr) //@nogc nothrow
+        {
+            this.ptr = ptr;
         }
     }
     
@@ -239,20 +253,23 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
             }
         }
 
-        @system private void listPtr(T* ptr) @nogc nothrow
+        @system private void listPtr(const bool remove = true)(T* ptr) @nogc nothrow
         {
-            UNr oldPtr = this._ptr;
             auto ptrList = &_ptrList;
-            if (ONLY_LIST || (oldPtr & 1U) == 1U)
+            static if (remove)
             {
-                static if (!ONLY_LIST)
+                UNr oldPtr = this._ptr;
+                if (ONLY_LIST || (oldPtr & 1U) == 1U)
                 {
-                    oldPtr >>>= 1;
-                }
-                if (oldPtr > 0U)
-                {
-                    (*ptrList)[oldPtr - 1U] = ptr;
-                    return;
+                    static if (!ONLY_LIST)
+                    {
+                        oldPtr >>>= 1;
+                    }
+                    if (oldPtr > 0U)
+                    {
+                        (*ptrList)[oldPtr - 1U] = ptr;
+                        return;
+                    }
                 }
             }
             ZNr ptrLength = ptrList.length;
@@ -284,42 +301,45 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         }
 
         pragma(inline, true)
-        @system public void ptr(T* ptr)
+        @system public void ptr(const bool remove = true)(T* ptr)
         {
-            static if (own == 0)
+            static if (remove)
             {
-                if (this.ptr == ptr)
+                static if (own == 0)
                 {
-                    return;
-                }
-                if (ptr == nil)
-                {
-                    if (clearList(this._ptr)) this._ptr = 0U;
-                    return;
-                }
-            }
-            else
-            {
-                if (ptr && ptr != this.ptr)
-                {
-                    static if (own > 0)
+                    if (this.ptr == ptr)
                     {
-                        this.decrease;
-                        this.reset;
+                        return;
                     }
-                    else
+                    if (ptr == nil)
                     {
-                        this.clean;
+                        if (clearList(this._ptr)) this._ptr = 0U;
+                        return;
                     }
                 }
                 else
                 {
-                    return;
+                    if (ptr && ptr != this.ptr)
+                    {
+                        static if (own > 0)
+                        {
+                            this.decrease;
+                            this.reset;
+                        }
+                        else
+                        {
+                            this.clean;
+                        }
+                    }
+                    else
+                    {
+                        return;
+                    }
                 }
             }
             static if (SHIFT_LEN < 0)
             {
-                this.listPtr(ptr);
+                this.listPtr!remove(ptr);
             }
             else
             {
@@ -334,7 +354,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 }
                 else
                 {
-                    this.listPtr(ptr);
+                    this.listPtr!remove(ptr);
                 }
             }
         }
@@ -384,7 +404,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 return true;
             }
             
-            @system T* ptr() const @nogc nothrow
+            @trusted T* ptr() const @nogc nothrow
             {
                 /*UNr ptr = this._ptr;
                 if (ptr == 0U)
@@ -399,7 +419,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 return cast(T*)((cast(PNr)this._ptr) << SHIFT_LEN);
             }
             
-            @system void ptr(const T* ptr) //@nogc nothrow
+            @trusted void ptr(const bool remove = true)(T* ptr) //@nogc nothrow
             {
                 /*if (ptr == nil)
                 {
@@ -407,7 +427,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 }
                 else
                 {*/
-                    static if (own > 0)
+                    static if (remove && own > 0)
                     {
                         if (ptr != this.ptr)
                         {
@@ -480,26 +500,16 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
             this._ptr = copy._ptr;
         }
     }*/
-       
-    @system void copy(T* ptr)
-    {
-        static if (own > 0)
-        {
-            this.count = nil;
-        }
-        this.ptr = ptr;
-    }
-
-    @system this(T* ptr)
-    {
-        this.copy(ptr);
-    }
 
     //static if (own == 0)
     //{
         @system void opAssign(T* ptr)
         {
-            this.copy(ptr);
+            static if (own > 0)
+            {
+                this.count = nil;
+            }
+            this.ptr = ptr;
         }
 
         /*@system void opAssign(ref return scope CmpsPtr copy)
