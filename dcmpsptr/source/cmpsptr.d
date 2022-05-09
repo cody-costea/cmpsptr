@@ -81,25 +81,40 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         {
             @system protected void clean()
             {
-                this.ptr.erase;
+                this.ptr.erase!(T, true);
                 static if (cmpsType > 0)
                 {
                     clearList(this._ptr);
                 }
                 //GC.removeRange(ptr);
             }
-
-            @trusted this(T* ptr) //@nogc nothrow
+            public
             {
-                this.ptr!false(ptr);
+                @safe Bit isNil() @nogc nothrow
+                {
+                    return this._ptr == 0U;
+                }
+
+                @trusted this(T* ptr) //@nogc nothrow
+                {
+                    this.ptr!false(ptr);
+                }
             }
         }
     }
     else
     {
-        @trusted this(T* ptr) //@nogc nothrow
+        public
         {
-            this.ptr = ptr;
+            @safe Bit isNil() @nogc nothrow
+            {
+                return this.ptr == nil;
+            }
+
+            @trusted this(T* ptr) //@nogc nothrow
+            {
+                this.ptr = ptr;
+            }
         }
     }
     
@@ -253,7 +268,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
             }
         }
 
-        @system private void listPtr(const bool remove = true)(T* ptr) @nogc nothrow
+        @system private void listPtr(const Bit remove = true)(T* ptr) @nogc nothrow
         {
             auto ptrList = &_ptrList;
             static if (remove)
@@ -301,7 +316,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         }
 
         pragma(inline, true)
-        @system public void ptr(const bool remove = true)(T* ptr)
+        @system public void ptr(const Bit remove = true)(T* ptr)
         {
             static if (remove)
             {
@@ -337,7 +352,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                     }
                 }
             }
-            static if (SHIFT_LEN < 0)
+            static if (ONLY_LIST)
             {
                 this.listPtr!remove(ptr);
             }
@@ -419,7 +434,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 return cast(T*)((cast(PNr)this._ptr) << SHIFT_LEN);
             }
             
-            @trusted void ptr(const bool remove = true)(T* ptr) //@nogc nothrow
+            @trusted void ptr(const Bit remove = true)(T* ptr) //@nogc nothrow
             {
                 /*if (ptr == nil)
                 {
@@ -501,6 +516,8 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         }
     }*/
 
+    public
+    {
     //static if (own == 0)
     //{
         @system void opAssign(T* ptr)
@@ -523,7 +540,34 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         }*/
     //}
 
-    @disable this();
+        import core.lifetime : forward;
+        @trusted T* ptrOrNew(Args...)(auto ref Args args)
+        {
+            auto ptr = this.ptr;
+            if (ptr) return ptr;
+            else
+            {
+                ptr = allocNew!T(forward!args);
+                this.ptr = ptr;
+                return ptr;
+            }
+        }
+
+        import std.traits : ReturnType;        
+        @trusted T* ptrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
+        {
+            auto ptr = this.ptr;
+            if (ptr) return ptr;
+            else
+            {
+                ptr = fn(forward!args);
+                this.ptr = ptr;
+                return ptr;
+            }
+        }
+
+        @disable this();
+    }
 }
 enum USE_GC_ALLOC = ALIGN_PTR_BYTES < -1  && COMPRESS_POINTERS > -1 && COMPRESS_POINTERS < 2;
 

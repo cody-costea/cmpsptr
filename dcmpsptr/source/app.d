@@ -36,14 +36,17 @@ void testHndlFunc(Hnl!("APP.Test.testArr", "APP") tst)
 
 extern (C) int main(string[] args) {        
     Test* ptr = allocNew!Test(5);
-    ptr.x = 7;
+    ptr.x = 71;
     printf("ptr.x = %d\n", ptr.x);
     printf("ptr.sizeof = %d\n", ptr.sizeof);
-    Ptr!(Test, -1) tst = ptr;
+    Ptr!(Test, -1) tst = nil;//ptr;
+    //tst.ptrOrNew(987);
+    //tst.ptrOrElse(() { return allocNew!Test(371); });
+    tst.ptrOrElse((Test* ptr) { return ptr; }, ptr);
     //printf("tst.count = %d\n", (tst.refCount));
     //testFunc(tst, 0);
     printf("tst.x = %d\n", tst.x);
-    tst.x = 1;
+    //tst.x = 1;
     printf("tst.x = %d\n", tst.x);
     printf("tst.sizeof = %d\n", tst.sizeof);
     //Hnl!("APP.Test.testArr", "APP") testArr = 2;
