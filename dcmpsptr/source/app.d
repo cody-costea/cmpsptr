@@ -53,12 +53,19 @@ void testHndlFunc(Hnl!("APP.RfcTest.testArr", "APP") tst)
 }
 
 extern (C) int main(string[] args) {
-    UnqTest* unq = allocNew!UnqTest(783);    
+    //UnqTest* unq = allocNew!UnqTest(783);
+    Ptr!UnqTest unq = allocNew!UnqTest(783);
     printf("unq.sizeof = %d\n", unq.sizeof);
-    RfcTest* ptr = allocNew!RfcTest(137, unq);
+    Ptr!RfcTest ptr = allocNew!RfcTest(137, unq);
     printf("ptr.sizeof = %d\n", ptr.sizeof);
     Ptr!(RfcTest, 1, 1) tst = nil;
-    auto rfc = tst.ptrOrElse((RfcTest* ptr) { return ptr; }, ptr);
+    auto rfc = tst.ptrOrElse((RfcTest* ptr) { return ptr; }, ptr);    
+    SNr nr = 1000;
+    SNr no = 2000;
+    tst.call((ref RfcTest r, SNr nr, SNr no) { auto z = r.y.z;
+                                               printf("CALL: %d + %d + %d = %d\n", z, nr, no, r.y.z + nr + no);
+                                             }, nr, no);
+    //printf("z = %d\n", z);
     printf("rfc.x = %d\n", rfc.x);
     printf("before tst.count = %d\n", (tst.refCount));
     testFunc(tst, 0);

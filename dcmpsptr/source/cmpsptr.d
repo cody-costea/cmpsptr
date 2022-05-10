@@ -94,14 +94,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
                     }
                     else
                     {
-                        static if (opt > 0)
-                        {
-                            this.ptr = nil;
-                        }
-                        else
-                        {
                             this._ptr = nil;
-                        }
                     }
                     //GC.removeRange(ptr);
                 }
@@ -146,8 +139,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
             {
                 @system void reset() //@nogc nothrow
                 {
-                    ZNr* countPtr = alloc!ZNr;
-                    (*countPtr) = 1;
+                    ZNr* countPtr = allocNew!ZNr(1);
                     this.count.ptr = countPtr;
                 }
                 
@@ -182,47 +174,63 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
             }
         }
     }
-    
+    static if (cmpsType < 1)
+    {
+        private @trusted void doCount(P, const Bit remove = true)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
+        {
+            static if (remove)
+            {
+                static if (opt < 1)
+                {
+                    static assert(!is(P == typeof(nil)), "Null pointers are not allowed.");
+                    assert(ptr, "Null pointers are not allowed.");
+                }
+                static if (own > 0)
+                {
+                    if (ptr != this.ptr)
+                    {
+                        this.decrease;
+                        this.reset;
+                    }
+                }
+                else static if (own < -1)
+                {
+                    if (ptr != this.ptr)
+                    {
+                        this.clean;
+                    }
+                }
+            }
+            else
+            {
+                static if (!opt)
+                {
+                    static assert(!is(P == typeof(nil)), "Null pointers are not allowed.");
+                    assert(ptr, "Null pointers are not allowed.");
+                }
+            }
+        }
+    }
     static if (cmpsType == 0)
     {
         public
         {
-            static if (opt > 0)
-            {
-                T* ptr = void;
-            }
-            else
-            {
-                private T* _ptr = void;
-
-                @safe T* ptr() @nogc nothrow
-                {
-                    return this._ptr;
-                }
-
-                @safe void ptr(P, const Bit remove = true)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
-                {
-                    static if (remove)
-                    {
-                        static if (opt < 1)
-                        {
-                            static assert(!is(P == typeof(nil)), "Null pointers are not allowed.");
-                            assert(ptr, "Null pointers are not allowed.");
-                        }
-                    }
-                    else
-                    {
-                        static if (!opt)
-                        {
-                            static assert(!is(P == typeof(nil)), "Null pointers are not allowed.");
-                            assert(ptr, "Null pointers are not allowed.");
-                        }
-                    }
-                    this._ptr = ptr;
-                }
-            }
+            private T* _ptr = void;
+            //private PNr _ptr = void;
             pragma(inline, true)
             {
+                @trusted T* ptr() const @nogc nothrow
+                {
+                    return cast(T*)this._ptr;
+                }
+
+                @safe void ptr(P, const Bit remove = true)(P* ptr)
+                {
+                    this.doCount!(P, remove)(ptr);
+                    //this._ptr = cast(PNr)ptr;
+                    this._ptr = ptr;
+                }
+
                 @safe Bit compressed() const @nogc nothrow
                 {
                     return false;
@@ -362,7 +370,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
         }
 
         //pragma(inline, true)
-        @system public void ptr(P, const Bit remove = true)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
+        @trusted public void ptr(P, const Bit remove = true)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
         {
             static if (remove)
             {
@@ -463,32 +471,9 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
                 return cast(T*)((cast(PNr)this._ptr) << SHIFT_LEN);
             }
             
-            @trusted void ptr(P, const Bit remove = true)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
+            @trusted void ptr(P, const Bit remove = true)(P* ptr)
             {
-                static if (remove)
-                {
-                    static if (opt < 1)
-                    {
-                        static assert(!is(P == typeof(nil)), "Null pointers are not allowed.");
-                        assert(ptr, "Null pointers are not allowed.");
-                    }
-                    static if (own > 0)
-                    {
-                        if (ptr != this.ptr)
-                        {
-                            this.decrease;
-                            this.reset;
-                        }
-                    }
-                }
-                else
-                {
-                    static if (!opt)
-                    {
-                        static assert(!is(P == typeof(nil)), "Null pointers are not allowed.");
-                        assert(ptr, "Null pointers are not allowed.");
-                    }
-                }
+                this.doCount!(P, remove)(ptr);
                 this._ptr = cast(UNr)((cast(PNr)ptr) >>> SHIFT_LEN);
             }
         }
@@ -512,10 +497,13 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
     
     alias ptr this;
 
+    static if (own)
+    {        
+        @disable this(this);
+    }
+
     static if (own > 0)
     {
-        @disable this(this);
-
         private @system void copy(ref return scope CmpsPtr copy) //@nogc nothrow
         {
             //this.count = nil;
@@ -527,19 +515,27 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
             }
         }
 
-        @system void opAssign(ref return scope CmpsPtr copy)
+        @trusted void opAssign(ref return scope CmpsPtr copy)
         {
             this.copy(copy);
         }
 
-        @system this(ref return scope CmpsPtr copy) //@nogc nothrow
+        @trusted this(ref return scope CmpsPtr copy) //@nogc nothrow
         {
             this.copy(copy);
         }
     }
-    else static if (own < 0)
-    {   
+    else static if (own == -1)
+    {
         @disable this(ref return scope CmpsPtr copy);
+    }
+    else static if (own < -1)
+    {
+        @trusted this(ref return scope CmpsPtr copy) //@nogc nothrow
+        {
+            this.ptr = copy.ptr;
+            copy.ptr!false = nil;
+        }
     }
     /*else
     {
@@ -553,7 +549,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
     {
         @trusted void copy(P = T)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
         {
-            static if (cmpsType || opt < 1)
+            static if (cmpsType > 0)
             {
                 auto oPtr = this.ptr;
                 if (oPtr)
@@ -577,7 +573,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
     //static if (own == 0)
     //{
 
-        @trusted void opAssign(P)(P* ptr) if (is(P == T))
+        @trusted void opAssign(P)(P* ptr) if (is(P == T) && own != -1)
         {
             this.copy(ptr);
         }
@@ -586,6 +582,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
         {
             @trusted void opAssign(typeof(nil) ptr)
             {
+                static assert(own != -1, "Cannot reassign unique pointer.");
                 this.copy!T(ptr);
             }
         }
@@ -631,7 +628,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
         }
 
         //import std.traits : isCallable;
-        @trusted ReturnType!F runIfPtr(F, Args...)(F fn, auto ref Args args) //if (isCallable!F)
+        @trusted ReturnType!F call(F, Args...)(F fn, auto ref Args args) //if (isCallable!F)
         {
             auto ptr = this.ptr;
             if (ptr)
