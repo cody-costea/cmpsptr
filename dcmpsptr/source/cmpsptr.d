@@ -84,49 +84,27 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
                 @system void clean()
                 {
                     this.ptr.erase!(T, true);
-                    static if (cmpsType > 0)
+                    static if (cmpsType)
                     {
-                        clearList(this._ptr);
-                    }
-                    //GC.removeRange(ptr);
-                }
-
-                @safe T* ptrOrNil() @nogc nothrow
-                {
-                    if (this._ptr == 0U)
-                    {
-                        return nil;
+                        this._ptr = 0U;
+                        static if (cmpsType > 0)
+                        {
+                            clearList(this._ptr);
+                        }
                     }
                     else
                     {
-                        return this.ptr;
+                        static if (opt > 0)
+                        {
+                            this.ptr = nil;
+                        }
+                        else
+                        {
+                            this._ptr = nil;
+                        }
                     }
+                    //GC.removeRange(ptr);
                 }
-            }
-            public
-            {
-                @safe Bit isNil() @nogc nothrow
-                {
-                    return this._ptr == 0U;
-                }
-            }
-        }
-    }
-    else
-    {
-        protected
-        {
-            @safe T* ptrOrNil() @nogc nothrow
-            {
-                return this.ptr;
-            }
-        }
-
-        public
-        {
-            @safe Bit isNil() @nogc nothrow
-            {
-                return this.ptr == nil;
             }
         }
     }
@@ -134,7 +112,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
     //public @trusted this(T* ptr)
     public @trusted this(P)(P* ptr) if (is(P == T))
     {
-        static if (own || opt < 1)
+        static if (cmpsType || opt < 1)
         {
             this.ptr!(P, false)(ptr);
             //this.ptr!(T, false)(ptr);
@@ -155,11 +133,11 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
     
     static if (own > 0)
     {
-        protected CmpsPtr!(ZNr, 0) count = void;
+        protected CmpsPtr!(ZNr, 0, 1) count = void;
 
         pragma(inline, true)
         {
-            public ZNr refCount()
+            public ZNr refCount() const @nogc nothrow
             {
                 return *(this.count.ptr);
             }
@@ -194,7 +172,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
                 if (cntNr == 1)
                 {
                     this.clean;
-                    count = nil;//cast(ZNr*)nil;
+                    count.ptr!ZNr = nil;//cast(ZNr*)nil;
                     cntPtr.free;
                 }
                 else //if (cntNr > 1)
@@ -209,7 +187,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
     {
         public
         {
-            static if (opt)
+            static if (opt > 0)
             {
                 T* ptr = void;
             }
@@ -464,31 +442,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
             T* ptr = this.ptr;
             this._ptr = 0U;
             this.ptr = ptr;
-        }*/        
-
-        static if (own < 0)
-        {
-            pragma(inline, true)
-            @system ~this()
-            {
-                this.clean;
-            }
-        }
-        else
-        {
-            pragma(inline, true)
-            @system ~this()
-            {
-                static if (own < 1)
-                {
-                    clearList(this._ptr);
-                }
-                else
-                {
-                    this.decrease;
-                }
-            }
-        }
+        }*/
     }
     else
     {
@@ -538,31 +492,31 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
                 this._ptr = cast(UNr)((cast(PNr)ptr) >>> SHIFT_LEN);
             }
         }
-        
-        pragma(inline, true):
-        static if (own < 0)
+    }
+
+    public pragma(inline, true):
+    static if (own < 0)
+    {
+        @system ~this() //@nogc nothrow
         {
-            @system ~this() //@nogc nothrow
-            {
-                this.clean;
-            }
+            this.clean;
         }
-        else static if (own > 0)
+    }
+    else static if (own > 0)
+    {
+        @system ~this() //@nogc nothrow
         {
-            @system ~this() //@nogc nothrow
-            {
-                this.decrease;
-            }
+            this.decrease;
         }
     }
     
     alias ptr this;
-    pragma(inline, true):
+
     static if (own > 0)
     {
         @disable this(this);
-        
-        @system void copy(ref return scope CmpsPtr copy) //@nogc nothrow
+
+        private @system void copy(ref return scope CmpsPtr copy) //@nogc nothrow
         {
             //this.count = nil;
             this.ptr = copy.ptr;
@@ -599,14 +553,21 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
     {
         @trusted void copy(P = T)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
         {
-            auto oPtr = this.ptr;
-            if (oPtr)
+            static if (cmpsType || opt < 1)
             {
-                this.ptr = ptr;
+                auto oPtr = this.ptr;
+                if (oPtr)
+                {
+                    this.ptr = ptr;
+                }
+                else
+                {
+                    this.ptr!(T, false) = ptr;
+                }
             }
             else
             {
-                this.ptr!(T, false) = oPtr;
+                this.ptr = ptr;
             }
         }
     }

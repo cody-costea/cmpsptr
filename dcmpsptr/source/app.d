@@ -2,14 +2,28 @@ module APP;
 import core.stdc.stdio;
 import cmpsptr;
 
-struct Test
+struct UnqTest
+{
+    SNr z = void;
+
+    ~this()
+    {
+        printf("UnqTest destructor!\n");
+    }
+}
+
+struct RfcTest
 {
     public static const SNr[3] testArr = [9, 8, 7];
 
-    SNr x = 3;
+    Ptr!(UnqTest, -1, -1) y = void;
 
-    this(const SNr x)
+    SNr x = void;
+
+    this(const SNr x, UnqTest* unqTest)
     {
+        this.y = unqTest;
+        printf("this.y.sizeof = %d\n", this.y.sizeof);
         this.x = x;
     }
 
@@ -17,49 +31,46 @@ struct Test
 
     ~this()
     {
-        printf("test destructor!\n");
+        printf("RfcTest destructor!\n");
+        //printf("y.z = %d", y.z);
     }
 }
 
-void testFunc(Ptr!(Test, 1) tst, const UNr again)
+void testFunc(Ptr!(RfcTest, 1) tst, const UNr again)
 {
-    printf("tst.count = %d\n", (tst.refCount));
+    printf("before tst.count = %d\n", (tst.refCount));
     if (again < 3)
     {
         testFunc(tst, again + 1);
-    }
+    }    
+    printf("after tst.count = %d\n", (tst.refCount));
 }
 
-void testHndlFunc(Hnl!("APP.Test.testArr", "APP") tst)
+void testHndlFunc(Hnl!("APP.RfcTest.testArr", "APP") tst)
 {
-    printf("APP.Test.testArr.index = %d\n", (tst.index));
-    printf("APP.Test.testArr.sizeof = %d\n", (tst.sizeof));
+    printf("APP.RfcTest.testArr.index = %d\n", (tst.index));
+    printf("APP.RfcTest.testArr.sizeof = %d\n", (tst.sizeof));
 }
 
-extern (C) int main(string[] args) {        
-    Test* ptr = allocNew!Test(5);
-    ptr.x = 71;
-    printf("ptr.x = %d\n", ptr.x);
+extern (C) int main(string[] args) {
+    UnqTest* unq = allocNew!UnqTest(783);    
+    printf("unq.sizeof = %d\n", unq.sizeof);
+    RfcTest* ptr = allocNew!RfcTest(137, unq);
     printf("ptr.sizeof = %d\n", ptr.sizeof);
-    Ptr!(Test, 1, 1) tst = nil;
-    tst.ptrOrNew(987);
-    //tst = allocNew!Test(837);
-    //tst.ptrOrElse(() { return allocNew!Test(371); });
-    //tst.objOrElse(() { return (allocNew!Test(371)); });
-    //tst.ptrOrElse((Test* ptr) { return ptr; }, ptr);
-    //tst.objOrElse((Test* ptr) { return ptr; }, ptr);
-    printf("tst.count = %d\n", (tst.refCount));
-    //testFunc(tst, 0);
+    Ptr!(RfcTest, 1, 1) tst = nil;
+    auto rfc = tst.ptrOrElse((RfcTest* ptr) { return ptr; }, ptr);
+    printf("rfc.x = %d\n", rfc.x);
+    printf("before tst.count = %d\n", (tst.refCount));
+    testFunc(tst, 0);
+    printf("after tst.count = %d\n", (tst.refCount));
     printf("tst.x = %d\n", tst.x);
-    //tst.x = 1;
+    tst.x = 873;
     printf("tst.x = %d\n", tst.x);
     printf("tst.sizeof = %d\n", tst.sizeof);
-    //Hnl!("APP.Test.testArr", "APP") testArr = 2;
-    Hnl!("APP.Test.testArr", "APP") testArr = &(APP.Test.testArr[2]);
+    //Hnl!("APP.RfcTest.testArr", "APP") testArr = 2;
+    Hnl!("APP.RfcTest.testArr", "APP") testArr = &(APP.RfcTest.testArr[2]);
     testHndlFunc(testArr);
     SNr testArrElm = testArr;
     printf("testArr = %d\n", testArrElm);
-    //printf("tst.count = %d\n", (tst.refCount));
-    //scanf("%d");
     return 0;
 }
