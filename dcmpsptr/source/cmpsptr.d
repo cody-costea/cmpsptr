@@ -73,20 +73,35 @@ static if (COMPRESS_POINTERS > 0)
     private Vct!(void*) _ptrList; //TODO: multiple thread shared access safety and analyze better solutions
 }
 
-struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
+struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COMPRESS_POINTERS)
 {
     static if (own)
     {
         pragma(inline, true)
         {
-            @system protected void clean()
+            protected
             {
-                this.ptr.erase!(T, true);
-                static if (cmpsType > 0)
+                @system void clean()
                 {
-                    clearList(this._ptr);
+                    this.ptr.erase!(T, true);
+                    static if (cmpsType > 0)
+                    {
+                        clearList(this._ptr);
+                    }
+                    //GC.removeRange(ptr);
                 }
-                //GC.removeRange(ptr);
+
+                @safe T* ptrOrNil() @nogc nothrow
+                {
+                    if (this._ptr == 0U)
+                    {
+                        return nil;
+                    }
+                    else
+                    {
+                        return this.ptr;
+                    }
+                }
             }
             public
             {
@@ -94,33 +109,53 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 {
                     return this._ptr == 0U;
                 }
-
-                @trusted this(T* ptr) //@nogc nothrow
-                {
-                    this.ptr!false(ptr);
-                }
             }
         }
     }
     else
     {
+        protected
+        {
+            @safe T* ptrOrNil() @nogc nothrow
+            {
+                return this.ptr;
+            }
+        }
+
         public
         {
             @safe Bit isNil() @nogc nothrow
             {
                 return this.ptr == nil;
             }
+        }
+    }
+    
+    //public @trusted this(T* ptr)
+    public @trusted this(P)(P* ptr) if (is(P == T))
+    {
+        static if (own || opt < 1)
+        {
+            this.ptr!(P, false)(ptr);
+            //this.ptr!(T, false)(ptr);
+        }
+        else
+        {
+            this.ptr = ptr;
+        }
+    }
 
-            @trusted this(T* ptr) //@nogc nothrow
-            {
-                this.ptr = ptr;
-            }
+    static if (opt)
+    {
+        public @trusted this(typeof(nil) ptr)
+        {
+            this(cast(T*)ptr);
         }
     }
     
     static if (own > 0)
     {
-        protected CmpsPtr!(ZNr, 0, COMPRESS_POINTERS) count = void;        
+        protected CmpsPtr!(ZNr, 0) count = void;
 
         pragma(inline, true)
         {
@@ -134,7 +169,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 @system void reset() //@nogc nothrow
                 {
                     ZNr* countPtr = alloc!ZNr;
-                    (*countPtr) = 0;
+                    (*countPtr) = 1;
                     this.count.ptr = countPtr;
                 }
                 
@@ -159,10 +194,10 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 if (cntNr == 1)
                 {
                     this.clean;
-                    count.ptr = nil;
+                    count = nil;//cast(ZNr*)nil;
                     cntPtr.free;
                 }
-                else
+                else //if (cntNr > 1)
                 {
                     (*cntPtr) = cntNr - 1;
                 }
@@ -174,7 +209,40 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
     {
         public
         {
-            T* ptr = void;
+            static if (opt)
+            {
+                T* ptr = void;
+            }
+            else
+            {
+                private T* _ptr = void;
+
+                @safe T* ptr() @nogc nothrow
+                {
+                    return this._ptr;
+                }
+
+                @safe void ptr(P, const Bit remove = true)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
+                {
+                    static if (remove)
+                    {
+                        static if (opt < 1)
+                        {
+                            static assert(!is(P == typeof(nil)), "Null pointers are not allowed.");
+                            assert(ptr, "Null pointers are not allowed.");
+                        }
+                    }
+                    else
+                    {
+                        static if (!opt)
+                        {
+                            static assert(!is(P == typeof(nil)), "Null pointers are not allowed.");
+                            assert(ptr, "Null pointers are not allowed.");
+                        }
+                    }
+                    this._ptr = ptr;
+                }
+            }
             pragma(inline, true)
             {
                 @safe Bit compressed() const @nogc nothrow
@@ -315,11 +383,16 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
             }
         }
 
-        pragma(inline, true)
-        @system public void ptr(const Bit remove = true)(T* ptr)
+        //pragma(inline, true)
+        @system public void ptr(P, const Bit remove = true)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
         {
             static if (remove)
             {
+                static if (opt < 1)
+                {
+                    static assert(!is(P == typeof(nil)), "Null pointers are not allowed.");
+                    assert(ptr, "Null pointers are not allowed.");
+                }
                 static if (own == 0)
                 {
                     if (this.ptr == ptr)
@@ -341,7 +414,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                             this.decrease;
                             this.reset;
                         }
-                        else
+                        else static if (own < 0)
                         {
                             this.clean;
                         }
@@ -350,6 +423,18 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                     {
                         return;
                     }
+                }
+            }
+            else
+            {
+                static if (!opt)
+                {
+                    static assert(!is(P == typeof(nil)), "Null pointers are not allowed.");
+                    assert(ptr, "Null pointers are not allowed.");
+                }
+                static if (own > 0)
+                {
+                    this.reset;
                 }
             }
             static if (ONLY_LIST)
@@ -361,7 +446,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                 const PNr ptrNr = cast(PNr)ptr; //<< 16) >>> 16;
                 if (ptrNr < (4294967295UL << SHIFT_LEN))
                 {
-                    static if (own < 0)
+                    static if (own < 1)
                     {
                         clearList(this._ptr);
                     }
@@ -421,28 +506,19 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
             
             @trusted T* ptr() const @nogc nothrow
             {
-                /*UNr ptr = this._ptr;
-                if (ptr == 0U)
-                {
-                    return nil;
-                }
-                else
-                {
-                    PNr ptrNr = (cast(PNr)ptr) << SHIFT_LEN;
-                    return cast(T*)((ptrNr & ((1UL << 48) - 1UL)) | ~((ptrNr & (1UL << 47)) - 1UL));
-                }*/
                 return cast(T*)((cast(PNr)this._ptr) << SHIFT_LEN);
             }
             
-            @trusted void ptr(const Bit remove = true)(T* ptr) //@nogc nothrow
+            @trusted void ptr(P, const Bit remove = true)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
             {
-                /*if (ptr == nil)
+                static if (remove)
                 {
-                    this._ptr = 0U;
-                }
-                else
-                {*/
-                    static if (remove && own > 0)
+                    static if (opt < 1)
+                    {
+                        static assert(!is(P == typeof(nil)), "Null pointers are not allowed.");
+                        assert(ptr, "Null pointers are not allowed.");
+                    }
+                    static if (own > 0)
                     {
                         if (ptr != this.ptr)
                         {
@@ -450,13 +526,16 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
                             this.reset;
                         }
                     }
-                    //PNr ptrNr = cast(PNr)ptr;
-                    //printf("PNr = %d\n", ptrNr);
-                    //PNr ptrNr = (cast(PNr)ptr << 16) >>> 16;
-                    //assert(ptrNr < (4294967295UL << SHIFT_LEN)); //TODO: analyze alternative solutions
-                    this._ptr = cast(UNr)((cast(PNr)ptr) >>> SHIFT_LEN);
-                    //this._ptr = cast(UNr)(ptrNr >>> SHIFT_LEN);
-                //}
+                }
+                else
+                {
+                    static if (!opt)
+                    {
+                        static assert(!is(P == typeof(nil)), "Null pointers are not allowed.");
+                        assert(ptr, "Null pointers are not allowed.");
+                    }
+                }
+                this._ptr = cast(UNr)((cast(PNr)ptr) >>> SHIFT_LEN);
             }
         }
         
@@ -516,17 +595,38 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         }
     }*/
 
+    private
+    {
+        @trusted void copy(P = T)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
+        {
+            auto oPtr = this.ptr;
+            if (oPtr)
+            {
+                this.ptr = ptr;
+            }
+            else
+            {
+                this.ptr!(T, false) = oPtr;
+            }
+        }
+    }
+
     public
     {
     //static if (own == 0)
     //{
-        @system void opAssign(T* ptr)
+
+        @trusted void opAssign(P)(P* ptr) if (is(P == T))
         {
-            static if (own > 0)
+            this.copy(ptr);
+        }
+
+        static if (opt > 0)
+        {
+            @trusted void opAssign(typeof(nil) ptr)
             {
-                this.count = nil;
+                this.copy!T(ptr);
             }
-            this.ptr = ptr;
         }
 
         /*@system void opAssign(ref return scope CmpsPtr copy)
@@ -544,31 +644,55 @@ struct CmpsPtr(T, const SNr own = 0, const SNr cmpsType = COMPRESS_POINTERS)
         @trusted T* ptrOrNew(Args...)(auto ref Args args)
         {
             auto ptr = this.ptr;
-            if (ptr) return ptr;
-            else
+            if (ptr == nil)
             {
                 ptr = allocNew!T(forward!args);
                 this.ptr = ptr;
-                return ptr;
             }
+            return ptr;
+        }
+
+        @trusted ref T objOrNew(Args...)(auto ref Args args)
+        {
+            return *(this.ptrOrNew(forward!args));
         }
 
         import std.traits : ReturnType;        
         @trusted T* ptrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
         {
             auto ptr = this.ptr;
-            if (ptr) return ptr;
-            else
+            if (ptr == nil)
             {
                 ptr = fn(forward!args);
                 this.ptr = ptr;
-                return ptr;
             }
+            return ptr;
+        }
+
+        //import std.traits : isCallable;
+        @trusted ReturnType!F runIfPtr(F, Args...)(F fn, auto ref Args args) //if (isCallable!F)
+        {
+            auto ptr = this.ptr;
+            if (ptr)
+            {
+                return fn(*ptr, forward!args);
+            }
+        }
+
+        @trusted ref T objOrElse(F, Args...)(F fn, auto ref Args args)
+        {
+            auto ptr = this.ptrOrElse(fn, forward!args);
+            if (ptr == nil)
+            {
+                ptr = allocNew!T;
+            }
+            return *ptr;
         }
 
         @disable this();
     }
 }
+
 enum USE_GC_ALLOC = ALIGN_PTR_BYTES < -1  && COMPRESS_POINTERS > -1 && COMPRESS_POINTERS < 2;
 
 static if (USE_GC_ALLOC)
