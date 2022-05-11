@@ -105,22 +105,22 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
     //public @trusted this(T* ptr)
     public @trusted this(P)(P* ptr) if (is(P == T))
     {
-        static if (cmpsType || opt < 1)
-        {
-            this.ptr!(P, false)(ptr);
-            //this.ptr!(T, false)(ptr);
-        }
-        else
-        {
-            this.ptr = ptr;
-        }
+        this.ptr!(P, false)(ptr);
+        //this.ptr!(T, false)(ptr);
     }
 
     static if (opt)
     {
-        public @trusted this(typeof(nil) ptr)
+        public @trusted this(typeof(nil))
         {
-            this(cast(T*)ptr);
+            static if (cmpsType)
+            {
+                this._ptr = 0U;
+            }
+            else
+            {
+                this._ptr = nil;
+            }
         }
     }
     
@@ -393,21 +393,21 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
                 }
                 else
                 {
-                    if (ptr && ptr != this.ptr)
+                    if (ptr == this.ptr)
+                    {
+                        return;
+                    }
+                    else
                     {
                         static if (own > 0)
                         {
                             this.decrease;
                             this.reset;
                         }
-                        else static if (own < 0)
+                        else static if (own < -1)
                         {
                             this.clean;
                         }
-                    }
-                    else
-                    {
-                        return;
                     }
                 }
             }
@@ -507,12 +507,30 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
         private @system void copy(ref return scope CmpsPtr copy) //@nogc nothrow
         {
             //this.count = nil;
-            this.ptr = copy.ptr;
             static if (own > 0)
             {
                 this.count = copy.count;
                 this.increase;
             }
+        }
+
+        @trusted void opAssign(ref return scope CmpsPtr copy)
+        {
+            this.ptr = copy.ptr;
+            this.copy(copy);
+        }
+
+        @trusted this(ref return scope CmpsPtr copy) //@nogc nothrow
+        {
+            this.ptr!(T, false) = copy.ptr;
+            this.copy(copy);
+        }
+    }
+    /*else static if (own == 0)
+    {
+        private @system void copy(ref return scope CmpsPtr copy) //@nogc nothrow
+        {
+            this._ptr = copy._ptr;
         }
 
         @trusted void opAssign(ref return scope CmpsPtr copy)
@@ -524,31 +542,45 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
         {
             this.copy(copy);
         }
-    }
+    }*/
     else static if (own == -1)
     {
         @disable this(ref return scope CmpsPtr copy);
+        @disable @trusted void opAssign(ref return scope CmpsPtr copy);
+        @disable @trusted void opAssign(typeof(nil));
+        @disable @trusted void opAssign(T* ptr);
     }
     else static if (own < -1)
     {
         @trusted this(ref return scope CmpsPtr copy) //@nogc nothrow
         {
-            this.ptr = copy.ptr;
-            copy.ptr!false = nil;
+            this._ptr = copy._ptr;
+            static if (cmpsType)
+            {
+                copy._ptr = 0U;
+            }
+            else
+            {
+                copy._ptr = nil;
+            }
+        }
+    /*}
+    static if (own < 0)
+    {*/
+        @trusted void opAssign(ref return scope CmpsPtr copy)
+        {
+            //static assert(own != -1, "Cannot reassign unique pointer.");
+            auto oPtr = this._ptr;
+            this._ptr = copy._ptr;
+            copy._ptr = oPtr;
         }
     }
-    /*else
-    {
-        @system void copy(ref return scope CmpsPtr copy) //@nogc nothrow
-        {
-            this._ptr = copy._ptr;
-        }
-    }*/
 
     private
     {
         @trusted void copy(P = T)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
         {
+            //static assert(own != -1, "Cannot reassign unique pointer.");
             static if (cmpsType > 0)
             {
                 auto oPtr = this.ptr;
@@ -570,33 +602,39 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
 
     public
     {
-    //static if (own == 0)
-    //{
-
-        @trusted void opAssign(P)(P* ptr) if (is(P == T) && own != -1)
+        static if (own != -1)
         {
-            this.copy(ptr);
-        }
-
-        static if (opt > 0)
-        {
-            @trusted void opAssign(typeof(nil) ptr)
+            @trusted void opAssign(P)(P* ptr) if (is(P == T) && own != -1)
             {
-                static assert(own != -1, "Cannot reassign unique pointer.");
-                this.copy!T(ptr);
+                this.copy!P(ptr);
+            }
+
+            static if (opt > 0)
+            {
+                @trusted void opAssign(typeof(nil))
+                {
+                    this.copy!T(nil);
+                }
             }
         }
 
-        /*@system void opAssign(ref return scope CmpsPtr copy)
+        @trusted ref T obj()
         {
-            this.copy(copy);
+            static if (opt)
+            {
+                auto ptr = this.ptr;
+                if (ptr == nil)
+                {
+                    ptr = allocNew!T;
+                    this.ptr = ptr;
+                }
+                return *ptr;
+            }
+            else
+            {
+                return *this.ptr;
+            }
         }
-
-        @system this(ref return scope CmpsPtr copy) //@nogc nothrow
-        {
-            this.copy(copy);
-        }*/
-    //}
 
         import core.lifetime : forward;
         @trusted T* ptrOrNew(Args...)(auto ref Args args)
@@ -635,6 +673,11 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
             {
                 return fn(*ptr, forward!args);
             }
+        }
+
+        @trusted ReturnType!F opCall(F, Args...)(F fn, auto ref Args args)
+        {
+            return this.call(fn, forward!args);
         }
 
         @trusted ref T objOrElse(F, Args...)(F fn, auto ref Args args)
