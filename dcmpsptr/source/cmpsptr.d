@@ -75,29 +75,35 @@ static if (COMPRESS_POINTERS > 0)
 
 struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COMPRESS_POINTERS)
 {
-    static if (own)
+    
+    protected pragma(inline, true)
     {
-        pragma(inline, true)
+        static if (own)
         {
-            protected
+            @system void clean()
             {
-                @system void clean()
+                this.ptr.erase!(T, true);
+                static if (cmpsType)
                 {
-                    this.ptr.erase!(T, true);
-                    static if (cmpsType)
+                    this._ptr = 0U;
+                    static if (cmpsType > 0)
                     {
-                        this._ptr = 0U;
-                        static if (cmpsType > 0)
-                        {
-                            clearList(this._ptr);
-                        }
+                        clearList(this._ptr);
                     }
-                    else
-                    {
-                            this._ptr = nil;
-                    }
-                    //GC.removeRange(ptr);
                 }
+                else
+                {
+                        this._ptr = nil;
+                }
+                //GC.removeRange(ptr);
+            }
+        }
+
+        static if (cmpsType)
+        {
+            @safe this(UNr ptr) @nogc nothrow
+            {
+                this._ptr = ptr;
             }
         }
     }
@@ -546,9 +552,6 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
     else static if (own == -1)
     {
         @disable this(ref return scope CmpsPtr copy);
-        @disable @trusted void opAssign(ref return scope CmpsPtr copy);
-        @disable @trusted void opAssign(typeof(nil));
-        @disable @trusted void opAssign(T* ptr);
     }
     else static if (own < -1)
     {
@@ -564,9 +567,6 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
                 copy._ptr = nil;
             }
         }
-    /*}
-    static if (own < 0)
-    {*/
         @trusted void opAssign(ref return scope CmpsPtr copy)
         {
             //static assert(own != -1, "Cannot reassign unique pointer.");
@@ -580,7 +580,8 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
     {
         @trusted void copy(P = T)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
         {
-            //static assert(own != -1, "Cannot reassign unique pointer.");
+            static assert(own != -1, "Cannot reassign unique pointer.");
+            //static assert (own != -1 || is(P == typeof(nil)));                
             static if (cmpsType > 0)
             {
                 auto oPtr = this.ptr;
@@ -602,20 +603,25 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
 
     public
     {
-        static if (own != -1)
-        {
+        /*static if (own != -1)
+        {*/
             @trusted void opAssign(P)(P* ptr) if (is(P == T) && own != -1)
             {
                 this.copy!P(ptr);
             }
 
-            static if (opt > 0)
+            static if (opt > 0 && own != -1)
             {
                 @trusted void opAssign(typeof(nil))
                 {
                     this.copy!T(nil);
                 }
             }
+        //}
+
+        @trusted CmpsPtr!(T, 0, opt, cmpsType) borrow() const
+        {
+            return CmpsPtr!(T, 0, opt, cmpsType)(this._ptr);
         }
 
         @trusted ref T obj()
