@@ -11,6 +11,7 @@ import core.stdc.stdint;
 import core.stdc.stdlib : free;
 import std.container.array : Array;
 import std.math.algebraic : abs;
+import core.lifetime : forward;
 /*
 If the COMPRESS_POINTERS enum is set to a non-zero value, 64bit pointers will be compressed into 32bit integers, according to the following options:
     +5 can compress addresses up to 32GB, at the expense of the 4 lower tag bits, which can no longer be used for other purporses
@@ -73,16 +74,47 @@ static if (COMPRESS_POINTERS > 0)
     private Vct!(void*) _ptrList; //TODO: multiple thread shared access safety and analyze better solutions
 }
 
-struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COMPRESS_POINTERS)
+enum Ownership : SNr
+{
+    MovableUnique = -2,
+    UnmovedUnique = -1,
+    Borrowed = 0,
+    CowCounted = 1,
+    SharedCounted = 2
+}
+
+enum Optionality : SNr
+{
+    LazyInit = -1,
+    NonNull = 0,
+    Nullable = 1
+}
+
+alias Own = Ownership;
+alias Opt = Optionality;
+
+struct CmpsPtr(T, const Own own = 2, const Opt opt = -1, const SNr cmpsType = COMPRESS_POINTERS)
 {
     
     protected pragma(inline, true)
     {
+        public @safe Bit isNil() const @nogc nothrow
+        {
+            static if (cmpsType)
+            {
+                return this._ptr == 0U;
+            }
+            else
+            {
+                return this._ptr == nil;
+            }
+        }
+
         static if (own)
         {
             @system void clean()
             {
-                this.ptr.erase!(T, true);
+                this.addr.erase!(T, true);
                 static if (cmpsType)
                 {
                     this._ptr = 0U;
@@ -132,13 +164,47 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
     
     static if (own > 0)
     {
-        protected CmpsPtr!(ZNr, 0, 1) count = void;
+        protected CmpsPtr!(ZNr, Own.Borrowed, Opt.Nullable) count = void;
 
         pragma(inline, true)
         {
-            public ZNr refCount() const @nogc nothrow
+            public 
             {
-                return *(this.count.ptr);
+                @trusted ZNr refCount() const @nogc nothrow
+                {
+                    auto cPtr = this.count.ptr;
+                    if (cPtr)
+                    {
+                        return *(cPtr);
+                    }
+                    else
+                    {
+                        return 0U;
+                    }
+                }
+                static if (__traits(isCopyable, T))
+                {
+                    @trusted void detach()
+                    {
+                        if (this.refCount > 1)
+                        {
+                            //auto nPtr = alloc!T;
+                            this.ptr = allocNew!T(*this.addr);
+                            /*import core.lifetime : copyEmplace;
+                            copyEmplace(*this.ptr, *nPtr);
+                            this.ptr = nPtr;*/
+                        }
+                    }
+                    static if (own == 1)
+                    {
+                        @trusted T* ptr()
+                        {
+                            this.detach;
+                            //return (cast(const CmpsPtr*)this).ptr;
+                            return this.addr;
+                        }
+                    }
+                }
             }
 
             protected
@@ -182,7 +248,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
     }
     static if (cmpsType < 1)
     {
-        private @trusted void doCount(P, const Bit remove = true)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
+        protected @trusted void doCount(P, const Bit remove = true)(P* ptr) if (is(P == T) || is(P == typeof(nil)))
         {
             static if (remove)
             {
@@ -193,7 +259,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
                 }
                 static if (own > 0)
                 {
-                    if (ptr != this.ptr)
+                    if (ptr != this.addr)
                     {
                         this.decrease;
                         this.reset;
@@ -201,7 +267,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
                 }
                 else static if (own < -1)
                 {
-                    if (ptr != this.ptr)
+                    if (ptr != this.addr)
                     {
                         this.clean;
                     }
@@ -225,7 +291,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
             //private PNr _ptr = void;
             pragma(inline, true)
             {
-                @trusted T* ptr() const @nogc nothrow
+                @trusted T* addr() const @nogc nothrow
                 {
                     return cast(T*)this._ptr;
                 }
@@ -296,7 +362,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
                     }
                 }
 
-                @trusted T* ptr() const @nogc nothrow
+                @trusted T* addr() const @nogc nothrow
                 {
                     const UNr ptr = this._ptr;
                     if (ptr == 0U)
@@ -387,7 +453,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
                 }
                 static if (own == 0)
                 {
-                    if (this.ptr == ptr)
+                    if (this.addr == ptr)
                     {
                         return;
                     }
@@ -399,7 +465,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
                 }
                 else
                 {
-                    if (ptr == this.ptr)
+                    if (ptr == this.addr)
                     {
                         return;
                     }
@@ -472,7 +538,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
                 return true;
             }
             
-            @trusted T* ptr() const @nogc nothrow
+            @trusted T* addr() const @nogc nothrow
             {
                 return cast(T*)((cast(PNr)this._ptr) << SHIFT_LEN);
             }
@@ -584,7 +650,7 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
             //static assert (own != -1 || is(P == typeof(nil)));                
             static if (cmpsType > 0)
             {
-                auto oPtr = this.ptr;
+                auto oPtr = this.addr;
                 if (oPtr)
                 {
                     this.ptr = ptr;
@@ -603,6 +669,10 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
 
     public
     {
+        public @trusted T* ptr() const @nogc nothrow
+        {
+            return this.addr;
+        }
         /*static if (own != -1)
         {*/
             @trusted void opAssign(P)(P* ptr) if (is(P == T) && own != -1)
@@ -619,9 +689,9 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
             }
         //}
 
-        @trusted CmpsPtr!(T, 0, opt, cmpsType) borrow() const
+        @trusted CmpsPtr!(T, Own.Borrowed, opt, cmpsType) borrow() const
         {
-            return CmpsPtr!(T, 0, opt, cmpsType)(this._ptr);
+            return CmpsPtr!(T, Own.Borrowed, opt, cmpsType)(this._ptr);
         }
 
         @trusted ref T obj()
@@ -642,10 +712,20 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
             }
         }
 
-        import core.lifetime : forward;
         @trusted T* ptrOrNew(Args...)(auto ref Args args)
         {
             auto ptr = this.ptr;
+            if (ptr == nil)
+            {
+                ptr = allocNew!T(forward!args);
+                this.ptr = ptr;
+            }
+            return ptr;
+        }
+
+        @trusted T* addrOrNew(Args...)(auto ref Args args)
+        {
+            auto ptr = this.addr;
             if (ptr == nil)
             {
                 ptr = allocNew!T(forward!args);
@@ -670,11 +750,22 @@ struct CmpsPtr(T, const SNr own = 0, const SNr opt = 1, const SNr cmpsType = COM
             }
             return ptr;
         }
+                
+        @trusted T* addrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
+        {
+            auto ptr = this.addr;
+            if (ptr == nil)
+            {
+                ptr = fn(forward!args);
+                this.ptr = ptr;
+            }
+            return ptr;
+        }
 
         //import std.traits : isCallable;
         @trusted ReturnType!F call(F, Args...)(F fn, auto ref Args args) //if (isCallable!F)
         {
-            auto ptr = this.ptr;
+            auto ptr = this.addr;
             if (ptr)
             {
                 return fn(*ptr, forward!args);
@@ -793,17 +884,17 @@ pragma(inline, true)
         }
     }
 
-    @system void erase(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
+    /*@system void erase(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
     {
         ptr.ptr.erase!(T, check);
-    }
+    }*/
 }
 
 @trusted T* allocNew(T, Args...)(auto ref Args args)
 {
     import core.lifetime : emplace;
     T* newInstance = alloc!T(1);
-    emplace!T(newInstance, args);
+    emplace!T(newInstance, forward!args);    
     return newInstance;
 }
 
