@@ -29,12 +29,15 @@ The following negative values can also be used, but they are not safe and will l
 */
 version(D_BetterC)
 {
-    enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 5;
+    enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : -5;
 }
 else
 {
-    enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 1;
+    enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : -5;
 }
+
+//This enum should be set to a non-zero value, only if the operating system is using the higher bits from 64bit pointers, to differentiate between processes.
+enum USE_GLOBAL_MASK = 1;
 
 enum nil = null;
 alias I8 = byte;
@@ -108,10 +111,11 @@ enum Optionality : SNr
 alias Own = Ownership;
 alias Opt = Optionality;
 
-struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.lazyInit, const SNr cmpsType = COMPRESS_POINTERS)
+struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullable, const SNr cmpsType = COMPRESS_POINTERS)
 {
-    static assert (own != Own.cowCounted || __traits(isCopyable, T), "Only copyable types can have copy-on-write pointers.");
-    static assert (!is(SharedOf!(shared CmpsPtr!(T, own, opt, cmpsType)*) == typeof(this)), "Compressed pointers cannot be shared.");
+    enum copyable = __traits(isCopyable, T);
+    static assert (own != Own.cowCounted || copyable, "Only copyable types can have copy-on-write pointers.");
+    static assert (!(is(typeof(this) == shared) || is(T == shared)), "Compressed pointers cannot be shared.");
     protected pragma(inline, true)
     {
         public @safe Bit isNil() const @nogc nothrow
@@ -140,25 +144,28 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.lazyIni
                 this.addr.erase!(T, true);
                 static if (cmpsType)
                 {
-                    this._ptr = 0U;
                     static if (cmpsType > 0)
                     {
                         clearList(this._ptr);
                     }
+                    this._ptr = 0U;
                 }
                 else
                 {
-                        this._ptr = nil;
+                    this._ptr = nil;
                 }
-                //GC.removeRange(ptr);
             }
         }
 
         static if (cmpsType)
         {
-            @safe this(UNr ptr) @nogc nothrow
+            @trusted this(UNr ptr) //@nogc nothrow
             {
                 this._ptr = ptr;
+                static if (own > 0)
+                {
+                    this.reset;
+                }
             }
         }
     }
@@ -187,7 +194,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.lazyIni
     
     static if (own > 0)
     {
-        protected CmpsPtr!(ZNr, Own.borrowed, Opt.nullable) count = void;
+        protected CmpsPtr!(ZNr, Own.borrowed, Opt.nullable) count = nil;//void;
 
         pragma(inline, true)
         {
@@ -205,7 +212,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.lazyIni
                         return 0U;
                     }
                 }
-                static if (__traits(isCopyable, T))
+                static if (copyable)
                 {
                     @trusted void detach()
                     {
@@ -407,12 +414,17 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.lazyIni
                             }
                             else
                             {
-                                //ptrNr = (cast(PNr)ptr) << SHIFT_LEN;
-                                return cast(T*)((cast(PNr)ptr) << SHIFT_LEN);
+                                static if (USE_GLOBAL_MASK)
+                                {
+                                    return cast(T*)applyGlobalMask((cast(PNr)ptr) << SHIFT_LEN);
+                                }
+                                else
+                                {
+                                    return cast(T*)((cast(PNr)ptr) << SHIFT_LEN);
+                                }
                             }
                         }
                     }
-                    //return cast(T*)((ptrNr & ((1UL << 48) - 1UL)) | ~((ptrNr & (1UL << 47)) - 1UL));
                 }
             }
         }
@@ -524,8 +536,16 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.lazyIni
             }
             else
             {
-                const PNr ptrNr = cast(PNr)ptr; //<< 16) >>> 16;
-                if (ptrNr < (4294967295UL << SHIFT_LEN))
+                const PNr ptrNr = cast(PNr)ptr;
+                static if (USE_GLOBAL_MASK)
+                {
+                    const bool ptrCheck = checkGlobalMask!SHIFT_LEN(ptrNr);
+                }
+                else
+                {
+                    const bool ptrCheck = ptrNr < (4294967296UL << SHIFT_LEN);
+                }
+                if (ptrCheck)
                 {
                     static if (own < 1)
                     {
@@ -563,13 +583,51 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.lazyIni
             
             @trusted T* addr() const @nogc nothrow
             {
-                return cast(T*)((cast(PNr)this._ptr) << SHIFT_LEN);
+                static if (USE_GLOBAL_MASK)
+                {
+                    auto ptr = this._ptr;
+                    if (ptr == 0U)
+                    {
+                        return nil;
+                    }
+                    else
+                    {
+                        return cast(T*)applyGlobalMask((cast(PNr)ptr) << SHIFT_LEN);
+                    }
+                }
+                else
+                {
+                    return cast(T*)((cast(PNr)this._ptr) << SHIFT_LEN);
+                }
             }
             
             @trusted void ptr(P, const Bit remove = true)(P* ptr)
             {
                 this.doCount!(P, remove)(ptr);
-                this._ptr = cast(UNr)((cast(PNr)ptr) >>> SHIFT_LEN);
+                static if (USE_GLOBAL_MASK)
+                {
+                    if (ptr == nil)
+                    {
+                        this._ptr = 0U;
+                    }
+                    else 
+                    {
+                        auto ptrNr = (cast(PNr)ptr);
+                        if (checkGlobalMask!SHIFT_LEN(ptrNr))
+                        {
+                            this._ptr = cast(UNr)(ptrNr >>> SHIFT_LEN);
+                        }
+                        else
+                        {
+                            import std.format : format;
+                            assert(0, format("Pointer address %ull cannot be compressed.", ptrNr));
+                        }
+                    }
+                }
+                else
+                {
+                    this._ptr = cast(UNr)((cast(PNr)ptr) >>> SHIFT_LEN);
+                }
             }
         }
     }
@@ -696,6 +754,14 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.lazyIni
         {
             return this.addr;
         }
+
+        static if (copyable)
+        {
+            @trusted CmpsPtr!(T, own, opt, cmpsType) clone() const
+            {
+                return CmpsPtr!(T, own, opt, cmpsType)(allocNew!T(*this.addr));
+            }
+        }
         /*static if (own != -1)
         {*/
             @trusted void opAssign(P)(P* ptr) if (is(P == T) && own != -1)
@@ -712,16 +778,16 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.lazyIni
             }
         //}
 
-        @trusted CmpsPtr!(T, Own.borrowed, opt, cmpsType) borrow() const
+        @trusted CmpsPtr!(T, Own.borrowed, Opt.nullable, cmpsType) borrow() //const
         {
-            return CmpsPtr!(T, Own.borrowed, opt, cmpsType)(this._ptr);
+            return CmpsPtr!(T, Own.borrowed, Opt.nullable, cmpsType)(this._ptr);
         }
 
         @trusted ref T obj()
         {
             static if (opt)
             {
-                auto ptr = this.ptr;
+                auto ptr = this.addr;
                 if (ptr == nil)
                 {
                     ptr = allocNew!T;
@@ -759,7 +825,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.lazyIni
 
         @trusted ref T objOrNew(Args...)(auto ref Args args)
         {
-            return *(this.ptrOrNew(forward!args));
+            return *(this.addrOrNew(forward!args));
         }
 
         import std.traits : ReturnType;        
@@ -795,19 +861,34 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.lazyIni
             }
         }
 
-        @trusted ReturnType!F opCall(F, Args...)(F fn, auto ref Args args)
-        {
-            return this.call(fn, forward!args);
-        }
-
         @trusted ref T objOrElse(F, Args...)(F fn, auto ref Args args)
         {
-            auto ptr = this.ptrOrElse(fn, forward!args);
+            auto ptr = this.addrOrElse(fn, forward!args);
             if (ptr == nil)
             {
                 ptr = allocNew!T;
             }
             return *ptr;
+        }
+
+        @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, cmpsType) nonNull()
+        {
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, cmpsType)(&(this.obj()));
+        }
+
+        @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, cmpsType) nonNullOrNew(Args...)(auto ref Args args)
+        {
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, cmpsType)(&(this.objOrNew(forward!args)));
+        }
+
+        @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, cmpsType) nonNullOrElse(F, Args...)(F fn, auto ref Args args)
+        {
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, cmpsType)(&(this.objOrElse(fn, forward!args)));
+        }
+
+        @trusted ReturnType!F opCall(F, Args...)(F fn, auto ref Args args)
+        {
+            return this.call(fn, forward!args);
         }
 
         @disable this();
@@ -922,6 +1003,65 @@ pragma(inline, true)
 }
 
 alias Ptr = CmpsPtr;
+
+static if (USE_GLOBAL_MASK)
+{
+    pragma(inline, true):
+    private
+    {
+        static if (USE_GLOBAL_MASK > 0)
+        {
+            PNr _global_mask = -1L;
+
+            @safe Bit checkGlobalMask(SNr shiftBits = COMPRESS_POINTERS ? abs(COMPRESS_POINTERS) - 1 : 0)(const PNr ptr) @nogc nothrow
+            {
+                enum SHIFT_BITS = (32 + shiftBits);
+                if (_global_mask == -1L)
+                {
+                    _global_mask = (ptr >>> SHIFT_BITS) << SHIFT_BITS;
+                    return true;
+                }
+                else
+                {
+                    return _global_mask == ((ptr >>> SHIFT_BITS) << SHIFT_BITS);
+                }
+            }
+
+            @safe PNr applyGlobalMask(const PNr ptr) @nogc nothrow
+            {
+                return ptr | _global_mask;
+            }
+        }
+        else
+        {
+            UNr _global_mask = -1;
+
+            @safe Bit checkGlobalMask(SNr shiftBits = COMPRESS_POINTERS ? abs(COMPRESS_POINTERS) - 1 : 0)(const PNr ptr) @nogc nothrow
+            {
+                enum SHIFT_BITS = (32 + shiftBits);
+                if (_global_mask == -1)
+                {
+                    _global_mask = (ptr >>> SHIFT_BITS);
+                    return true;
+                }
+                else
+                {
+                    return _global_mask == ((ptr >>> SHIFT_BITS) << shiftBits);
+                }
+            }
+
+            @safe PNr applyGlobalMask(const PNr ptr) @nogc nothrow
+            {
+                return ptr | ((cast(PNr)_global_mask) << 32);
+            }
+        }
+    }
+
+    @safe auto globalMask() @nogc nothrow
+    {
+        return _global_mask;
+    }
+}
 
 struct IdxHndl(string array, string arrayModule = "", U = Idx)
 {
