@@ -33,7 +33,7 @@ version(D_BetterC)
 }
 else
 {
-    enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : -5;
+    enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 5;
 }
 
 //This enum should be set to a non-zero value, only if the operating system is using the higher bits from 64bit pointers, to differentiate between processes.
@@ -50,8 +50,10 @@ alias I16 = short;
 alias U16 = ushort;
 alias ZNr = size_t;
 alias PNr = uintptr_t;
+alias Nil = typeof(nil);
 alias Str = const(char)*;
 alias DNr = ptrdiff_t;
+alias Ref(T) = ref T;
 alias F64 = double;
 alias Txt = char*;
 alias U64 = ulong;
@@ -66,26 +68,6 @@ alias Idx = U16;
 alias SBt = I8;
 alias UBt = U8;
 alias Nr = SNr;
-
-static if (COMPRESS_POINTERS > 5)
-{
-    enum ALIGN_PTR_BYTES = 1 << (COMPRESS_POINTERS - 1);
-}
-else static if (COMPRESS_POINTERS < -5)
-{
-    enum ALIGN_PTR_BYTES = 1 << (abs(COMPRESS_POINTERS + 1));
-}
-else
-{
-    version(D_BetterC)
-    {
-        enum ALIGN_PTR_BYTES = -1;
-    }
-    else
-    {
-        enum ALIGN_PTR_BYTES = -2;
-    }
-}
 
 static if (COMPRESS_POINTERS > 0)
 {
@@ -113,6 +95,26 @@ alias Opt = Optionality;
 
 struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullable, const SNr cmpsType = COMPRESS_POINTERS)
 {
+    static if (COMPRESS_POINTERS > 5)
+    {
+        enum ALIGN_PTR_BYTES = 1 << (COMPRESS_POINTERS - 1);
+    }
+    else static if (COMPRESS_POINTERS < -5)
+    {
+        enum ALIGN_PTR_BYTES = 1 << (abs(COMPRESS_POINTERS + 1));
+    }
+    else
+    {
+        version(D_BetterC)
+        {
+            enum ALIGN_PTR_BYTES = -1;
+        }
+        else
+        {
+            enum ALIGN_PTR_BYTES = -2;
+        }
+    }
+
     enum copyable = __traits(isCopyable, T);
     static assert (own != Own.cowCounted || copyable, "Only copyable types can have copy-on-write pointers.");
     static assert (!(is(typeof(this) == shared) || is(T == shared)), "Compressed pointers cannot be shared.");
@@ -141,7 +143,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         {
             @system void clean()
             {
-                this.addr.erase!(T, true);
+                Mgr!(cmpsType, ALIGN_PTR_BYTES).erase!(T, true)(this.addr);
                 static if (cmpsType)
                 {
                     static if (cmpsType > 0)
@@ -219,7 +221,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                         if (this.refCount > 1)
                         {
                             //auto nPtr = alloc!T;
-                            this.ptr = allocNew!T(*this.addr);
+                            this.ptr = Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T(*this.addr);
                             /*import core.lifetime : copyEmplace;
                             copyEmplace(*this.ptr, *nPtr);
                             this.ptr = nPtr;*/
@@ -241,7 +243,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             {
                 @system void reset() //@nogc nothrow
                 {
-                    ZNr* countPtr = allocNew!ZNr(1);
+                    ZNr* countPtr = Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!ZNr(1);
                     this.count.ptr = countPtr;
                 }
                 
@@ -759,7 +761,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         {
             @trusted CmpsPtr!(T, own, opt, cmpsType) clone() const
             {
-                return CmpsPtr!(T, own, opt, cmpsType)(allocNew!T(*this.addr));
+                return CmpsPtr!(T, own, opt, cmpsType)(Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T(*this.addr));
             }
         }
         /*static if (own != -1)
@@ -790,7 +792,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 auto ptr = this.addr;
                 if (ptr == nil)
                 {
-                    ptr = allocNew!T;
+                    ptr = Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T;
                     this.ptr = ptr;
                 }
                 return *ptr;
@@ -806,7 +808,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             auto ptr = this.ptr;
             if (ptr == nil)
             {
-                ptr = allocNew!T(forward!args);
+                ptr = Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T(forward!args);
                 this.ptr = ptr;
             }
             return ptr;
@@ -817,7 +819,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             auto ptr = this.addr;
             if (ptr == nil)
             {
-                ptr = allocNew!T(forward!args);
+                ptr = Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T(forward!args);
                 this.ptr = ptr;
             }
             return ptr;
@@ -866,7 +868,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             auto ptr = this.addrOrElse(fn, forward!args);
             if (ptr == nil)
             {
-                ptr = allocNew!T;
+                ptr = Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T;
             }
             return *ptr;
         }
@@ -895,114 +897,118 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     }
 }
 
-enum USE_GC_ALLOC = ALIGN_PTR_BYTES < -1  && COMPRESS_POINTERS > -1 && COMPRESS_POINTERS < 2;
+template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignBytes = 1 << (abs(cmpsType) - 1))
+{
+    enum USE_GC_ALLOC = ptrAlignBytes < -1  && cmpsType > -1 && cmpsType < 2;
 
-static if (USE_GC_ALLOC)
-{
-    import core.memory : GC;
-}
-else static if (ALIGN_PTR_BYTES > -1)
-{
-    version (Windows)
+    static if (USE_GC_ALLOC)
     {
-        //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)    
-        @nogc nothrow private extern(C) void* _aligned_malloc(size_t, size_t);
-        @nogc nothrow private extern(C) void _aligned_free(void* memblock);
+        import core.memory : GC;
     }
-}
-
-pragma(inline, true)
-{
-    @trusted T* alloc(T)(const SNr qty = 1) //@nogc nothrow
+    else static if (ptrAlignBytes > -1)
     {
-        static if (USE_GC_ALLOC)
+        version (Windows)
         {
-            return cast(T*)GC.malloc(T.sizeof * qty);
+            //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)    
+            @nogc nothrow private extern(C) void* _aligned_malloc(size_t, size_t);
+            @nogc nothrow private extern(C) void _aligned_free(void* memblock);
         }
-        else static if (ALIGN_PTR_BYTES < 0)
+    }
+
+    public pragma(inline, true)
+    {
+        @trusted T* alloc(T)(const SNr qty = 1) //@nogc nothrow
         {
-            import core.stdc.stdlib : malloc;
-            return cast(T*)malloc(T.sizeof * qty);
-        }
-        else
-        {
-            //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)
-            version (Posix)
+            static if (USE_GC_ALLOC)
             {
-                void* ptr;
-                import core.sys.posix.stdlib : posix_memalign;
-                reurn (posix_memalign(&ptr, ALIGN_PTR_BYTES, T.sizeof * qty)) ? nil : cast(T*)ptr;
+                return cast(T*)GC.malloc(T.sizeof * qty);
             }
-            else version(Windows)
+            else static if (ptrAlignBytes < 0)
             {
-                return cast(T*)_aligned_malloc(ALIGN_PTR_BYTES, T.sizeof * qty);
+                import core.stdc.stdlib : malloc;
+                return cast(T*)malloc(T.sizeof * qty);
             }
-        }
-    }
-
-    @system void clear(T, const Bit check = false)(T** ptr) @nogc nothrow
-    {
-        static if (check)
-        {
-            if (ptr == nil) return;
-        }
-        (*ptr).erase!(T, check);
-        (*ptr) = nil;
-    }
-
-    @system void clear(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
-    {
-        ptr.erase!(T, check);
-        ptr.ptr = nil;
-    }
-
-    @system void erase(T, const Bit check = false)(T* ptr)
-    {
-        static if (check)
-        {
-            if (ptr == nil) return;
-        }
-        (*ptr).destroy;
-        static if (USE_GC_ALLOC)
-        {
-            GC.free(ptr);
-        }
-        else
-        {
-            //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)
-            version(Windows)
+            else
             {
-                static if (ALIGN_PTR_BYTES > -1)
+                //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)
+                version (Posix)
                 {
-                    ptr._aligned_free;
+                    void* ptr;
+                    import core.sys.posix.stdlib : posix_memalign;
+                    reurn (posix_memalign(&ptr, ptrAlignBytes, T.sizeof * qty)) ? nil : cast(T*)ptr;
+                }
+                else version(Windows)
+                {
+                    return cast(T*)_aligned_malloc(ptrAlignBytes, T.sizeof * qty);
+                }
+            }
+        }
+
+        @system void clear(T, const Bit check = false)(T** ptr) @nogc nothrow
+        {
+            static if (check)
+            {
+                if (ptr == nil) return;
+            }
+            (*ptr).erase!(T, check);
+            (*ptr) = nil;
+        }
+
+        @system void clear(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
+        {
+            ptr.erase!(T, check);
+            ptr.ptr = nil;
+        }
+
+        @system void erase(T, const Bit check = false)(T* ptr)
+        {
+            static if (check)
+            {
+                if (ptr == nil) return;
+            }
+            (*ptr).destroy;
+            static if (USE_GC_ALLOC)
+            {
+                GC.free(ptr);
+            }
+            else
+            {
+                //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)
+                version(Windows)
+                {
+                    static if (ptrAlignBytes > -1)
+                    {
+                        ptr._aligned_free;
+                    }
+                    else
+                    {
+                        ptr.free;
+                    }
                 }
                 else
                 {
                     ptr.free;
                 }
             }
-            else
-            {
-                ptr.free;
-            }
+        }
+
+        @system void erase(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
+        {
+            ptr.ptr.erase!(T, check);
+        }
+
+        @trusted T* allocNew(T, Args...)(auto ref Args args)
+        {
+            import core.lifetime : emplace;
+            T* newInstance = alloc!T(1);
+            emplace!T(newInstance, forward!args);    
+            return newInstance;
         }
     }
-
-    @system void erase(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
-    {
-        ptr.ptr.erase!(T, check);
-    }
-}
-
-@trusted T* allocNew(T, Args...)(auto ref Args args)
-{
-    import core.lifetime : emplace;
-    T* newInstance = alloc!T(1);
-    emplace!T(newInstance, forward!args);    
-    return newInstance;
 }
 
 alias Ptr = CmpsPtr;
+alias Mgr = MemoryManager;
 
 static if (USE_GLOBAL_MASK)
 {
@@ -1041,7 +1047,7 @@ static if (USE_GLOBAL_MASK)
                 enum SHIFT_BITS = (32 + shiftBits);
                 if (_global_mask == -1)
                 {
-                    _global_mask = (ptr >>> SHIFT_BITS);
+                    _global_mask = (ptr >>> SHIFT_BITS) << shiftBits;
                     return true;
                 }
                 else
@@ -1060,6 +1066,13 @@ static if (USE_GLOBAL_MASK)
     @safe auto globalMask() @nogc nothrow
     {
         return _global_mask;
+    }
+}
+else
+{
+    @safe Bit globalMask() @nogc nothrow
+    {
+        return false;
     }
 }
 
