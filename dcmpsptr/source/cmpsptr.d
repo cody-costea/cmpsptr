@@ -27,12 +27,20 @@ The following negative values can also be used, but they are not safe and will l
     -2 can compress addresses up to 8GB, at the expense of the lower tag bit, which can no longer be used for other purporses
     -1 can compress addresses up to 4GB, leaving the 3 lower tag bits to be used for other purporses
 */
-enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 5;
+version(D_BetterC)
+{
+    enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 5;
+}
+else
+{
+    enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 1;
+}
 
 enum nil = null;
 alias I8 = byte;
 alias U8 = ubyte;
 alias Bit = bool;
+alias Raw(T) = T*;
 alias Vct = Array;
 alias F32 = float;
 alias I16 = short;
@@ -66,7 +74,14 @@ else static if (COMPRESS_POINTERS < -5)
 }
 else
 {
-    enum ALIGN_PTR_BYTES = -1;
+    version(D_BetterC)
+    {
+        enum ALIGN_PTR_BYTES = -1;
+    }
+    else
+    {
+        enum ALIGN_PTR_BYTES = -2;
+    }
 }
 
 static if (COMPRESS_POINTERS > 0)
@@ -76,37 +91,45 @@ static if (COMPRESS_POINTERS > 0)
 
 enum Ownership : SNr
 {
-    MovableUnique = -2,
-    UnmovedUnique = -1,
-    Borrowed = 0,
-    CowCounted = 1,
-    SharedCounted = 2
+    movableUnique = -2,
+    fixedUnique = -1,
+    borrowed = 0,
+    cowCounted = 1,
+    sharedCounted = 2
 }
 
 enum Optionality : SNr
 {
-    LazyInit = -1,
-    NonNull = 0,
-    Nullable = 1
+    lazyInit = -1,
+    nonNull = 0,
+    nullable = 1
 }
 
 alias Own = Ownership;
 alias Opt = Optionality;
 
-struct CmpsPtr(T, const Own own = 2, const Opt opt = -1, const SNr cmpsType = COMPRESS_POINTERS)
+struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.lazyInit, const SNr cmpsType = COMPRESS_POINTERS)
 {
-    
+    static assert (own != Own.cowCounted || __traits(isCopyable, T), "Only copyable types can have copy-on-write pointers.");
+    static assert (!is(SharedOf!(shared CmpsPtr!(T, own, opt, cmpsType)*) == typeof(this)), "Compressed pointers cannot be shared.");
     protected pragma(inline, true)
     {
         public @safe Bit isNil() const @nogc nothrow
         {
-            static if (cmpsType)
+            static if (opt)
             {
-                return this._ptr == 0U;
+                static if (cmpsType)
+                {
+                    return this._ptr == 0U;
+                }
+                else
+                {
+                    return this._ptr == nil;
+                }
             }
             else
             {
-                return this._ptr == nil;
+                return false;
             }
         }
 
@@ -164,7 +187,7 @@ struct CmpsPtr(T, const Own own = 2, const Opt opt = -1, const SNr cmpsType = CO
     
     static if (own > 0)
     {
-        protected CmpsPtr!(ZNr, Own.Borrowed, Opt.Nullable) count = void;
+        protected CmpsPtr!(ZNr, Own.borrowed, Opt.nullable) count = void;
 
         pragma(inline, true)
         {
@@ -689,9 +712,9 @@ struct CmpsPtr(T, const Own own = 2, const Opt opt = -1, const SNr cmpsType = CO
             }
         //}
 
-        @trusted CmpsPtr!(T, Own.Borrowed, opt, cmpsType) borrow() const
+        @trusted CmpsPtr!(T, Own.borrowed, opt, cmpsType) borrow() const
         {
-            return CmpsPtr!(T, Own.Borrowed, opt, cmpsType)(this._ptr);
+            return CmpsPtr!(T, Own.borrowed, opt, cmpsType)(this._ptr);
         }
 
         @trusted ref T obj()
@@ -884,10 +907,10 @@ pragma(inline, true)
         }
     }
 
-    /*@system void erase(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
+    @system void erase(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
     {
         ptr.ptr.erase!(T, check);
-    }*/
+    }
 }
 
 @trusted T* allocNew(T, Args...)(auto ref Args args)
