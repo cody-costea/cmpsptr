@@ -71,7 +71,7 @@ alias Nr = SNr;
 
 static if (COMPRESS_POINTERS > 0)
 {
-    private Vct!(void*) _ptrList; //TODO: multiple thread shared access safety and analyze better solutions
+    private Vct!(void*) _ptr_list; //TODO: multiple thread shared access safety and analyze better solutions
 }
 
 enum Ownership : SNr
@@ -90,14 +90,13 @@ enum Optionality : SNr
     nullable = 1
 }
 
-enum Forward;
-
 alias Own = Ownership;
 alias Opt = Optionality;
 
 struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullable, const SNr cmpsType = COMPRESS_POINTERS)
 {
     enum copyable = __traits(isCopyable, T);
+    enum constructible = __traits(compiles, T());
     static assert (own != Own.cowCounted || copyable, "Only copyable types can have copy-on-write pointers.");
     static assert (!(is(typeof(this) == shared) || is(T == shared)), "Compressed pointers cannot be shared.");
 
@@ -257,8 +256,9 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 if (cntNr == 1)
                 {
                     this.clean;
-                    count.ptr!ZNr = nil;//cast(ZNr*)nil;
-                    cntPtr.free;
+                    count.ptr!ZNr = nil;//cast(ZNr*)nil;                    
+                    Mgr!(cmpsType).erase!(T, false)(cntPtr);
+                    //cntPtr.free;
                 }
                 else //if (cntNr > 1)
                 {
@@ -345,7 +345,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
             if (ONLY_LIST || (ptr & 1U) == 1U)
             {
-                auto ptrList = &_ptrList;
+                auto ptrList = &_ptr_list;
                 static if (!ONLY_LIST)
                 {
                     ptr >>>= 1;
@@ -395,13 +395,13 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     {
                         static if (ONLY_LIST)
                         {
-                            return cast(T*)_ptrList[ptr - 1U];
+                            return cast(T*)_ptr_list[ptr - 1U];
                         }
                         else
                         {
                             if ((ptr & 1U) == 1U)
                             {
-                                return cast(T*)_ptrList[(ptr >>> 1) - 1U];
+                                return cast(T*)_ptr_list[(ptr >>> 1) - 1U];
                             }
                             else
                             {
@@ -422,7 +422,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
         @system private void listPtr(const Bit remove = true)(T* ptr) @nogc nothrow
         {
-            auto ptrList = &_ptrList;
+            auto ptrList = &_ptr_list;
             static if (remove)
             {
                 UNr oldPtr = this._ptr;
@@ -775,72 +775,155 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             return CmpsPtr!(T, Own.borrowed, Opt.nullable, cmpsType)(this._ptr);
         }
 
-        @trusted ref T obj()
+        static if (opt)
         {
-            static if (opt)
+            @trusted ref T obj()
+            {
+                auto ptr = this.addr;
+                static if (constructible)
+                {
+                    if (ptr == nil)
+                    {
+                        ptr = Mgr!(cmpsType).allocNew!T;
+                        this.ptr = ptr;
+                    }
+                }
+                else
+                {
+                    assert(ptr, "References cannot be null.");
+                }
+                return *ptr;
+            }
+
+            @trusted T* ptrOrNew(Args...)(auto ref Args args)
+            {
+                auto ptr = this.ptr;
+                if (ptr == nil)
+                {
+                    ptr = Mgr!(cmpsType).allocNew!T(forward!args);
+                    this.ptr = ptr;
+                }
+                return ptr;
+            }
+
+            @trusted T* addrOrNew(Args...)(auto ref Args args)
             {
                 auto ptr = this.addr;
                 if (ptr == nil)
                 {
-                    ptr = Mgr!(cmpsType).allocNew!T;
+                    ptr = Mgr!(cmpsType).allocNew!T(forward!args);
                     this.ptr = ptr;
+                }
+                return ptr;
+            }
+
+            import std.traits : ReturnType;
+            @trusted T* ptrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
+            {
+                auto ptr = this.ptr;
+                if (ptr == nil)
+                {
+                    ptr = fn(forward!args);
+                    this.ptr = ptr;
+                }
+                return ptr;
+            }
+                    
+            @trusted T* addrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
+            {
+                auto ptr = this.addr;
+                if (ptr == nil)
+                {
+                    ptr = fn(forward!args);
+                    this.ptr = ptr;
+                }
+                return ptr;
+            }
+
+            @trusted ref T objOrElse(F, Args...)(F fn, auto ref Args args)
+            {
+                auto ptr = this.addrOrElse(fn, forward!args);
+                static if (constructible)
+                {
+                    if (ptr == nil)
+                    {
+                        ptr = Mgr!(cmpsType).allocNew!T;
+                        this.ptr = ptr;
+                    }
+                }
+                else
+                {
+                    assert(ptr, "References cannot be null.");
                 }
                 return *ptr;
             }
-            else
+
+            @trusted T* takePtr()
             {
-                return *this.ptr;
+                auto ptr = this.addr;
+                if (ptr)
+                {
+                    static if (own > 0)
+                    {
+                        if (this.refCount > 1)
+                        {
+                            this.decrease;
+                            this.count = nil;
+                        }
+                        else
+                        {
+                            Mgr!(cmpsType).erase!(T, true)(this.count.takePtr);
+                        }
+                    }
+                    static if (cmpsType)
+                    {
+                        this._ptr = 0U;
+                    }
+                    else
+                    {
+                        this._ptr = nil;
+                    }
+                }
+                return ptr;
             }
         }
-
-        @trusted T* ptrOrNew(Args...)(auto ref Args args)
+        else
         {
-            auto ptr = this.ptr;
-            if (ptr == nil)
+            @trusted ref T obj()
             {
-                ptr = Mgr!(cmpsType).allocNew!T(forward!args);
-                this.ptr = ptr;
+                return *this.addr;
             }
-            return ptr;
-        }
 
-        @trusted T* addrOrNew(Args...)(auto ref Args args)
-        {
-            auto ptr = this.addr;
-            if (ptr == nil)
+            @trusted T* ptrOrNew(Args...)(auto ref Args args)
             {
-                ptr = Mgr!(cmpsType).allocNew!T(forward!args);
-                this.ptr = ptr;
+                return this.ptr;
             }
-            return ptr;
+
+            @trusted T* addrOrNew(Args...)(auto ref Args args)
+            {
+                return this.addr;
+            }
+
+            import std.traits : ReturnType;
+            @trusted T* ptrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
+            {
+                return this.ptr;
+            }
+                    
+            @trusted T* addrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
+            {
+                return this.addr;
+            }
+
+            @trusted ref T objOrElse(F, Args...)(F fn, auto ref Args args)
+            {
+                return *this.addr;
+            }
         }
 
         @trusted ref T objOrNew(Args...)(auto ref Args args)
         {
             return *(this.addrOrNew(forward!args));
-        }
-
-        import std.traits : ReturnType;        
-        @trusted T* ptrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
-        {
-            auto ptr = this.ptr;
-            if (ptr == nil)
-            {
-                ptr = fn(forward!args);
-                this.ptr = ptr;
-            }
-            return ptr;
-        }
-                
-        @trusted T* addrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
-        {
-            auto ptr = this.addr;
-            if (ptr == nil)
-            {
-                ptr = fn(forward!args);
-                this.ptr = ptr;
-            }
-            return ptr;
         }
 
         //import std.traits : isCallable;
@@ -851,16 +934,6 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             {
                 return fn(*ptr, forward!args);
             }
-        }
-
-        @trusted ref T objOrElse(F, Args...)(F fn, auto ref Args args)
-        {
-            auto ptr = this.addrOrElse(fn, forward!args);
-            if (ptr == nil)
-            {
-                ptr = Mgr!(cmpsType).allocNew!T;
-            }
-            return *ptr;
         }
 
         @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, cmpsType) nonNull()
@@ -911,7 +984,8 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 }
 
 public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignBytes = cmpsType
-                              ? (abs(cmpsType) > 5 ? 1 << (abs(cmpsType) - 1) : -2) : -2)
+                              ? (abs(cmpsType) > 5 ? 1 << (abs(cmpsType > 0 ? cmpsType - 1
+                              : cmpsType) - 1) : -2) : -2)
 {
     version (D_BetterC)
     {
@@ -1340,54 +1414,60 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
     alias obj this;
 }
 
-mixin template ForwardCalls(frwAttr)
+enum Forward;
+
+mixin template ForwardCalls(frwAttr = Forward)
 {
     auto opDispatch(string called, Args...)(auto ref Args args)
     {
+        import std.algorithm.comparison : among;
         foreach (mbr; __traits(allMembers, typeof(this)))
         {
-            alias M = typeof(mixin(mbr));
-            import std.traits : isAggregateType, isCallable;
-            enum callable = isCallable!M;
-            static if (callable)
+            static if (!mbr.among("__xpostblit", "__xdtor", "__dtor", "__ctor", "opAssign"))
             {
-                alias F = ReturnType!M;
-            }
-            else
-            {
-                alias F = M;
-            }
-            import std.traits : isPointer, PointerTarget;
-            static if (isPointer!F)
-            {
-                alias P = PointerTarget!F;
-            }
-            else
-            {
-                alias P = F;
-            }
-            static if (isAggregateType!P)
-            {
-                import std.traits : hasUDA;
-                static if (hasUDA!(mixin(mbr), frwAttr))
+                alias M = typeof(mixin(mbr));
+                import std.traits : isCallable;
+                static if (isCallable!M /*&& (!mbr.among("__xpostblit", "__xdtor", "__dtor", "__ctor", "opAssign"))*/)
                 {
-                    static if (__traits(hasMember, P, called))
+                    alias F = ReturnType!M;
+                }
+                else
+                {
+                    alias F = M;
+                }
+                import std.traits : isPointer, PointerTarget;
+                static if (isPointer!F)
+                {
+                    alias P = PointerTarget!F;
+                }
+                else
+                {
+                    alias P = F;
+                }
+                import std.traits : isAggregateType;
+                static if (isAggregateType!P)
+                {
+                    import std.traits : hasUDA;
+                    static if (hasUDA!(mixin(mbr), frwAttr))
                     {
-                        enum argsLen = args.length;
-                        static if (argsLen > 0)
+                        static if (__traits(hasMember, P, called))
                         {
-                            static if (argsLen > 1)
+                            enum argsLen = args.length;
+                            static if (argsLen > 0)
                             {
-                                return mixin(mbr ~ "." ~ called)(forward!args);
+                                static if (argsLen > 1)
+                                {
+                                    return mixin(mbr ~ "." ~ called)(forward!args);
+                                }
+                                else
+                                {
+                                    return mixin(mbr ~ "." ~ called ~ " = args[0]");
+                                }
                             }
                             else
                             {
-                                return mixin(mbr ~ "." ~ called ~ " = args[0]");
+                                return mixin(mbr ~ "." ~ called);
                             }
-                        }
-                        else
-                        {
-                            return mixin(mbr ~ "." ~ called);
                         }
                     }
                 }
