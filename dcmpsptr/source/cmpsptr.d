@@ -118,6 +118,13 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     enum copyable = __traits(isCopyable, T);
     static assert (own != Own.cowCounted || copyable, "Only copyable types can have copy-on-write pointers.");
     static assert (!(is(typeof(this) == shared) || is(T == shared)), "Compressed pointers cannot be shared.");
+
+    @trusted static CmpsPtr makeNew(T, Args...)(auto ref Args args)
+    {
+        return (CmpsPtr(Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T(forward!args)));
+    }
+
+
     protected pragma(inline, true)
     {
         public @safe Bit isNil() const @nogc nothrow
@@ -897,7 +904,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     }
 }
 
-template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignBytes = 1 << (abs(cmpsType) - 1))
+public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignBytes = 1 << (abs(cmpsType) - 1))
 {
     enum USE_GC_ALLOC = ptrAlignBytes < -1  && cmpsType > -1 && cmpsType < 2;
 
@@ -905,7 +912,25 @@ template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignBytes = 1 <
     {
         import core.memory : GC;
     }
-    else static if (ptrAlignBytes > -1)
+    else static if (ptrAlignBytes == 0)
+    {
+        version (Windows)
+        {
+            //Source: $(PHOBOSSRC std/experimental/allocator/_mmap_allocator.d)
+            extern (Windows) private pure @system @nogc nothrow
+            {
+                import core.sys.windows.basetsd : SIZE_T;
+                import core.sys.windows.windef : BOOL, DWORD;
+                import core.sys.windows.winnt : LPVOID, PVOID;
+
+                DWORD GetLastError();
+                void SetLastError(DWORD);
+                PVOID VirtualAlloc(PVOID, SIZE_T, DWORD, DWORD);
+                BOOL VirtualFree(PVOID, SIZE_T, DWORD);
+            }
+        }
+    }
+    else static if (ptrAlignBytes > 0)
     {
         version (Windows)
         {
@@ -928,6 +953,26 @@ template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignBytes = 1 <
                 import core.stdc.stdlib : malloc;
                 return cast(T*)malloc(T.sizeof * qty);
             }
+            else static if (ptrAlignBytes == 0)
+            {
+                //Source: $(PHOBOSSRC std/experimental/allocator/_mmap_allocator.d)
+                version (Posix)
+                {
+                    import core.sys.posix.sys.mman : mmap, MAP_ANON, PROT_READ, PROT_WRITE, MAP_PRIVATE, MAP_FAILED;
+                    auto p = mmap(1U, T.sizeof * qty, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+                    return (p is MAP_FAILED) ? nil : cast(T*)p;
+                }
+                version (Windows)
+                {
+                    import core.sys.windows.winnt : MEM_COMMIT, PAGE_READWRITE;
+                    return VirtualAlloc(null, bytes, MEM_COMMIT, PAGE_READWRITE);
+                }
+                else
+                {
+                    import core.stdc.stdlib : malloc;
+                    return cast(T*)malloc(T.sizeof * qty);
+                }
+            }
             else
             {
                 //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)
@@ -935,7 +980,7 @@ template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignBytes = 1 <
                 {
                     void* ptr;
                     import core.sys.posix.stdlib : posix_memalign;
-                    reurn (posix_memalign(&ptr, ptrAlignBytes, T.sizeof * qty)) ? nil : cast(T*)ptr;
+                    return (posix_memalign(&ptr, ptrAlignBytes, T.sizeof * qty)) ? nil : cast(T*)ptr;
                 }
                 else version(Windows)
                 {
@@ -976,18 +1021,44 @@ template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignBytes = 1 <
                 //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)
                 version(Windows)
                 {
-                    static if (ptrAlignBytes > -1)
+                    
+                }
+                else
+                {
+                    version(Posix)
                     {
-                        ptr._aligned_free;
+                        static if (ptrAlignBytes)
+                        {
+                            ptr.free;
+                        }
+                        else
+                        {
+                            //Source: $(PHOBOSSRC std/experimental/allocator/_mmap_allocator.d)
+                            import core.sys.posix.sys.mman : munmap;
+                            ptr.munmap(T.sizeof);
+                        }
+                    }
+                    version(Windows)
+                    {
+                        static if (ptrAlignBytes == 0)
+                        {
+                            //Source: $(PHOBOSSRC std/experimental/allocator/_mmap_allocator.d)
+                            import core.sys.windows.winnt : MEM_RELEASE;
+                            ptr.VirtualFree(0, MEM_RELEASE);
+                        }
+                        else static if (ptrAlignBytes > 0)
+                        {
+                            ptr._aligned_free;
+                        }
+                        else
+                        {
+                            ptr.free;
+                        }
                     }
                     else
                     {
                         ptr.free;
                     }
-                }
-                else
-                {
-                    ptr.free;
                 }
             }
         }
