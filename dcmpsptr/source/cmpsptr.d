@@ -154,17 +154,18 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 this._ptr = ptr;
                 static if (own > 0)
                 {
-                    this.reset;
+                    if (ptr)
+                    {
+                        this.reset;
+                    }
                 }
             }
         }
     }
     
-    //public @trusted this(T* ptr)
     public @trusted this(P)(P* ptr) if (is(P == T))
     {
         this.ptr!(P, false)(ptr);
-        //this.ptr!(T, false)(ptr);
     }
 
     static if (opt)
@@ -208,11 +209,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     {
                         if (this.refCount > 1)
                         {
-                            //auto nPtr = alloc!T;
                             this.ptr = Mgr!(cmpsType).allocNew!T(*this.addr);
-                            /*import core.lifetime : copyEmplace;
-                            copyEmplace(*this.ptr, *nPtr);
-                            this.ptr = nPtr;*/
                         }
                     }
                     static if (own == 1)
@@ -220,7 +217,6 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                         @Forward @trusted T* ptr()
                         {
                             this.detach;
-                            //return (cast(const CmpsPtr*)this).ptr;
                             return this.addr;
                         }
                     }
@@ -256,9 +252,8 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 if (cntNr == 1)
                 {
                     this.clean;
-                    count.ptr!ZNr = nil;//cast(ZNr*)nil;                    
-                    Mgr!(cmpsType).erase!(T, false)(cntPtr);
-                    //cntPtr.free;
+                    count.ptr!ZNr = nil;
+                    Mgr!(cmpsType).erase!(ZNr, false)(cntPtr);
                 }
                 else //if (cntNr > 1)
                 {
@@ -858,33 +853,43 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 return *ptr;
             }
 
-            @trusted T* takePtr()
+            static if (own != -1)
             {
-                auto ptr = this.addr;
-                if (ptr)
+                @trusted T* takePtr()
                 {
-                    static if (own > 0)
+                    auto ptr = this.addr;
+                    if (ptr)
                     {
-                        if (this.refCount > 1)
+                        static if (own > 0)
                         {
-                            this.decrease;
-                            this.count = nil;
+                            auto count = &this.count;
+                            auto cntPtr = count.ptr;
+                            if (cntPtr)
+                            {
+                                const auto cntNr = *cntPtr;
+                                if (cntNr > 1)
+                                {
+                                    (*cntPtr) = cntNr - 1;
+                                }
+                                else
+                                {
+                                    count.ptr!ZNr = nil;
+                                    Mgr!(cmpsType).erase!(ZNr, false)(cntPtr);
+                                }
+                                count = nil;
+                            }
+                        }
+                        static if (cmpsType)
+                        {
+                            this._ptr = 0U;
                         }
                         else
                         {
-                            Mgr!(cmpsType).erase!(T, true)(this.count.takePtr);
+                            this._ptr = nil;
                         }
                     }
-                    static if (cmpsType)
-                    {
-                        this._ptr = 0U;
-                    }
-                    else
-                    {
-                        this._ptr = nil;
-                    }
+                    return ptr;
                 }
-                return ptr;
             }
         }
         else
@@ -1473,6 +1478,7 @@ mixin template ForwardCalls(frwAttr = Forward)
                 }
             }
         }
+        //static assert (0, "Method \"" ~ called ~ "\" cannot be forwarded.");
     }
 }
 
