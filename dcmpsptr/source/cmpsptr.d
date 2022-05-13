@@ -90,38 +90,20 @@ enum Optionality : SNr
     nullable = 1
 }
 
+enum Forward;
+
 alias Own = Ownership;
 alias Opt = Optionality;
 
 struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullable, const SNr cmpsType = COMPRESS_POINTERS)
 {
-    static if (COMPRESS_POINTERS > 5)
-    {
-        enum ALIGN_PTR_BYTES = 1 << (COMPRESS_POINTERS - 1);
-    }
-    else static if (COMPRESS_POINTERS < -5)
-    {
-        enum ALIGN_PTR_BYTES = 1 << (-(COMPRESS_POINTERS + 1));
-    }
-    else
-    {
-        version(D_BetterC)
-        {
-            enum ALIGN_PTR_BYTES = -1;
-        }
-        else
-        {
-            enum ALIGN_PTR_BYTES = -2;
-        }
-    }
-
     enum copyable = __traits(isCopyable, T);
     static assert (own != Own.cowCounted || copyable, "Only copyable types can have copy-on-write pointers.");
     static assert (!(is(typeof(this) == shared) || is(T == shared)), "Compressed pointers cannot be shared.");
 
     @trusted static CmpsPtr makeNew(T, Args...)(auto ref Args args)
     {
-        return (CmpsPtr(Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T(forward!args)));
+        return (CmpsPtr(Mgr!(cmpsType).allocNew!T(forward!args)));
     }
 
 
@@ -150,7 +132,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         {
             @system void clean()
             {
-                Mgr!(cmpsType, ALIGN_PTR_BYTES).erase!(T, true)(this.addr);
+                Mgr!(cmpsType).erase!(T, true)(this.addr);
                 static if (cmpsType)
                 {
                     static if (cmpsType > 0)
@@ -228,7 +210,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                         if (this.refCount > 1)
                         {
                             //auto nPtr = alloc!T;
-                            this.ptr = Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T(*this.addr);
+                            this.ptr = Mgr!(cmpsType).allocNew!T(*this.addr);
                             /*import core.lifetime : copyEmplace;
                             copyEmplace(*this.ptr, *nPtr);
                             this.ptr = nPtr;*/
@@ -236,7 +218,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     }
                     static if (own == 1)
                     {
-                        @trusted T* ptr()
+                        @Forward @trusted T* ptr()
                         {
                             this.detach;
                             //return (cast(const CmpsPtr*)this).ptr;
@@ -250,7 +232,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             {
                 @system void reset() //@nogc nothrow
                 {
-                    ZNr* countPtr = Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!ZNr(1);
+                    ZNr* countPtr = Mgr!(cmpsType).allocNew!ZNr(1);
                     this.count.ptr = countPtr;
                 }
                 
@@ -401,7 +383,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     }
                 }
 
-                @trusted T* addr() const @nogc nothrow
+                @trusted  T* addr() const @nogc nothrow
                 {
                     const UNr ptr = this._ptr;
                     if (ptr == 0U)
@@ -590,7 +572,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 return true;
             }
             
-            @trusted T* addr() const @nogc nothrow
+            @trusted  T* addr() const @nogc nothrow
             {
                 static if (USE_GLOBAL_MASK)
                 {
@@ -657,7 +639,8 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         }
     }
     
-    alias ptr this;
+    //alias ptr this;
+    mixin ForwardCalls!Forward;
 
     static if (own)
     {        
@@ -759,7 +742,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
     public
     {
-        public @trusted T* ptr() const @nogc nothrow
+        public @Forward @trusted T* ptr() const @nogc nothrow
         {
             return this.addr;
         }
@@ -768,7 +751,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         {
             @trusted CmpsPtr!(T, own, opt, cmpsType) clone() const
             {
-                return CmpsPtr!(T, own, opt, cmpsType)(Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T(*this.addr));
+                return CmpsPtr!(T, own, opt, cmpsType)(Mgr!(cmpsType, ).allocNew!T(*this.addr));
             }
         }
         /*static if (own != -1)
@@ -799,7 +782,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 auto ptr = this.addr;
                 if (ptr == nil)
                 {
-                    ptr = Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T;
+                    ptr = Mgr!(cmpsType).allocNew!T;
                     this.ptr = ptr;
                 }
                 return *ptr;
@@ -815,7 +798,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             auto ptr = this.ptr;
             if (ptr == nil)
             {
-                ptr = Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T(forward!args);
+                ptr = Mgr!(cmpsType).allocNew!T(forward!args);
                 this.ptr = ptr;
             }
             return ptr;
@@ -826,7 +809,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             auto ptr = this.addr;
             if (ptr == nil)
             {
-                ptr = Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T(forward!args);
+                ptr = Mgr!(cmpsType).allocNew!T(forward!args);
                 this.ptr = ptr;
             }
             return ptr;
@@ -875,7 +858,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             auto ptr = this.addrOrElse(fn, forward!args);
             if (ptr == nil)
             {
-                ptr = Mgr!(cmpsType, ALIGN_PTR_BYTES).allocNew!T;
+                ptr = Mgr!(cmpsType).allocNew!T;
             }
             return *ptr;
         }
@@ -900,13 +883,44 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             return this.call(fn, forward!args);
         }
 
+        @safe Bit opEquals()(auto ref const CmpsPtr cmp) const @nogc nothrow
+        {
+            return this._ptr == cmp._ptr;
+        }
+
+        @safe SNr opCmp()(auto ref const CmpsPtr cmp) const @nogc nothrow
+        {
+            const auto cmpAddr = cmp._ptr;
+            const auto ptrAddr = this._ptr;
+            return ptrAddr > cmpAddr ? 1 : (ptrAddr < cmpAddr ? -1 : 0);
+        }
+
+        @safe Bit opEquals(const T* ptr) const @nogc nothrow
+        {
+            return this.addr == ptr;
+        }
+
+        @safe SNr opCmp(const T* ptr) const @nogc nothrow
+        {
+            const auto addr = this.addr;
+            return addr > ptr ? 1 : (addr < ptr ? -1 : 0);
+        }
+
         @disable this();
     }
 }
 
-public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignBytes = cmpsType ? (abs(cmpsType) > 5 ? 1 << (abs(cmpsType) - 1) : -2) : -2)
+public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignBytes = cmpsType
+                              ? (abs(cmpsType) > 5 ? 1 << (abs(cmpsType) - 1) : -2) : -2)
 {
-    enum USE_GC_ALLOC = ptrAlignBytes < -1  && cmpsType > -1 && cmpsType < 2;
+    version (D_BetterC)
+    {
+        enum USE_GC_ALLOC = false;
+    }
+    else
+    {
+        enum USE_GC_ALLOC = ptrAlignBytes < -1  && cmpsType > -1 && cmpsType < 2;
+    }
 
     static if (USE_GC_ALLOC)
     {
@@ -1324,6 +1338,62 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
     @disable this();
     
     alias obj this;
+}
+
+mixin template ForwardCalls(frwAttr)
+{
+    auto opDispatch(string called, Args...)(auto ref Args args)
+    {
+        foreach (mbr; __traits(allMembers, typeof(this)))
+        {
+            alias M = typeof(mixin(mbr));
+            import std.traits : isAggregateType, isCallable;
+            enum callable = isCallable!M;
+            static if (callable)
+            {
+                alias F = ReturnType!M;
+            }
+            else
+            {
+                alias F = M;
+            }
+            import std.traits : isPointer, PointerTarget;
+            static if (isPointer!F)
+            {
+                alias P = PointerTarget!F;
+            }
+            else
+            {
+                alias P = F;
+            }
+            static if (isAggregateType!P)
+            {
+                import std.traits : hasUDA;
+                static if (hasUDA!(mixin(mbr), frwAttr))
+                {
+                    static if (__traits(hasMember, P, called))
+                    {
+                        enum argsLen = args.length;
+                        static if (argsLen > 0)
+                        {
+                            static if (argsLen > 1)
+                            {
+                                return mixin(mbr ~ "." ~ called)(forward!args);
+                            }
+                            else
+                            {
+                                return mixin(mbr ~ "." ~ called ~ " = args[0]");
+                            }
+                        }
+                        else
+                        {
+                            return mixin(mbr ~ "." ~ called);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 alias Hnl = IdxHndl;
