@@ -101,7 +101,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     }
     else static if (COMPRESS_POINTERS < -5)
     {
-        enum ALIGN_PTR_BYTES = 1 << (abs(COMPRESS_POINTERS + 1));
+        enum ALIGN_PTR_BYTES = 1 << (-(COMPRESS_POINTERS + 1));
     }
     else
     {
@@ -904,7 +904,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     }
 }
 
-public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignBytes = 1 << (abs(cmpsType) - 1))
+public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignBytes = cmpsType ? (abs(cmpsType) > 5 ? 1 << (abs(cmpsType) - 1) : -2) : -2)
 {
     enum USE_GC_ALLOC = ptrAlignBytes < -1  && cmpsType > -1 && cmpsType < 2;
 
@@ -934,9 +934,12 @@ public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignByte
     {
         version (Windows)
         {
-            //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)    
-            @nogc nothrow private extern(C) void* _aligned_malloc(size_t, size_t);
-            @nogc nothrow private extern(C) void _aligned_free(void* memblock);
+            //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)
+            extern (Windows) private @system @nogc nothrow
+            {
+                void* _aligned_malloc(size_t, size_t);
+                void _aligned_free(void* memblock);
+            }
         }
     }
 
@@ -959,13 +962,13 @@ public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignByte
                 version (Posix)
                 {
                     import core.sys.posix.sys.mman : mmap, MAP_ANON, PROT_READ, PROT_WRITE, MAP_PRIVATE, MAP_FAILED;
-                    auto p = mmap(1U, T.sizeof * qty, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+                    auto p = mmap(cast(void*)1U, T.sizeof * qty, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
                     return (p is MAP_FAILED) ? nil : cast(T*)p;
                 }
                 version (Windows)
                 {
                     import core.sys.windows.winnt : MEM_COMMIT, PAGE_READWRITE;
-                    return VirtualAlloc(null, bytes, MEM_COMMIT, PAGE_READWRITE);
+                    return cast(T*)VirtualAlloc(cast(void*)1U, T.sizeof * qty, MEM_COMMIT, PAGE_READWRITE);
                 }
                 else
                 {
@@ -978,13 +981,18 @@ public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignByte
                 //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)
                 version (Posix)
                 {
-                    void* ptr;
+                    void* ptr = void;
                     import core.sys.posix.stdlib : posix_memalign;
                     return (posix_memalign(&ptr, ptrAlignBytes, T.sizeof * qty)) ? nil : cast(T*)ptr;
                 }
                 else version(Windows)
                 {
                     return cast(T*)_aligned_malloc(ptrAlignBytes, T.sizeof * qty);
+                }
+                else
+                {
+                    import core.stdc.stdlib : malloc;
+                    return cast(T*)malloc(T.sizeof * qty);                    
                 }
             }
         }
@@ -1005,7 +1013,7 @@ public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignByte
             ptr.ptr = nil;
         }
 
-        @system void erase(T, const Bit check = false)(T* ptr)
+        @system void erase(T, const Bit check = false)(T* ptr, const SNr qty = 1)
         {
             static if (check)
             {
@@ -1035,7 +1043,7 @@ public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignByte
                         {
                             //Source: $(PHOBOSSRC std/experimental/allocator/_mmap_allocator.d)
                             import core.sys.posix.sys.mman : munmap;
-                            ptr.munmap(T.sizeof);
+                            ptr.munmap(T.sizeof * qty);
                         }
                     }
                     version(Windows)
