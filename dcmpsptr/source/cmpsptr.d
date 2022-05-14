@@ -105,7 +105,6 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         return (CmpsPtr(Mgr!(cmpsType).allocNew!T(forward!args)));
     }
 
-
     protected pragma(inline, true)
     {
         public @safe Bit isNil() const @nogc nothrow
@@ -621,14 +620,14 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     public pragma(inline, true):
     static if (own < 0)
     {
-        @system ~this() //@nogc nothrow
+        @trusted ~this() //@nogc nothrow
         {
             this.clean;
         }
     }
     else static if (own > 0)
     {
-        @system ~this() //@nogc nothrow
+        @trusted ~this() //@nogc nothrow
         {
             this.decrease;
         }
@@ -1432,17 +1431,19 @@ mixin template ForwardCalls(frwAttr = Forward)
             {
                 alias M = typeof(mixin(mbr));
                 import std.traits : isCallable;
-                static if (isCallable!M /*&& (!mbr.among("__xpostblit", "__xdtor", "__dtor", "__ctor", "opAssign"))*/)
+                static if (isCallable!M)
                 {
+                    import std.traits : ReturnType;
                     alias F = ReturnType!M;
                 }
                 else
                 {
                     alias F = M;
                 }
-                import std.traits : isPointer, PointerTarget;
+                import std.traits : isPointer;
                 static if (isPointer!F)
                 {
+                    import std.traits : PointerTarget;
                     alias P = PointerTarget!F;
                 }
                 else
@@ -1455,21 +1456,27 @@ mixin template ForwardCalls(frwAttr = Forward)
                     import std.traits : hasUDA;
                     static if (hasUDA!(mixin(mbr), frwAttr))
                     {
-                        static if (__traits(hasMember, P, called))
+                        enum argsLen = args.length;
+                        static if (argsLen > 0)
                         {
-                            enum argsLen = args.length;
-                            static if (argsLen > 0)
+                            static if (argsLen > 1)
                             {
-                                static if (argsLen > 1)
+                                static if (__traits(compiles, mixin(mbr ~ "." ~ called)(forward!args)))
                                 {
                                     return mixin(mbr ~ "." ~ called)(forward!args);
                                 }
-                                else
+                            }
+                            else
+                            {
+                                static if (__traits(compiles, mixin(mbr ~ "." ~ called ~ " = args[0]")))
                                 {
                                     return mixin(mbr ~ "." ~ called ~ " = args[0]");
                                 }
                             }
-                            else
+                        }
+                        else
+                        {
+                            static if (__traits(compiles, mixin(mbr ~ "." ~ called)))
                             {
                                 return mixin(mbr ~ "." ~ called);
                             }
@@ -1478,7 +1485,6 @@ mixin template ForwardCalls(frwAttr = Forward)
                 }
             }
         }
-        //static assert (0, "Method \"" ~ called ~ "\" cannot be forwarded.");
     }
 }
 
