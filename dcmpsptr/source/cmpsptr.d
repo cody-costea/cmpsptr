@@ -68,10 +68,7 @@ alias SBt = I8;
 alias UBt = U8;
 alias Nr = SNr;
 
-static if (COMPRESS_POINTERS > 0)
-{
-    private Vct!(void*) _ptr_list; //TODO: multiple thread shared access safety and analyze better solutions
-}
+private Vct!(void*) _ptr_list; //TODO: multiple thread shared access safety and analyze better solutions
 
 enum Ownership : SNr
 {
@@ -624,6 +621,16 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     else
     {
         mixin ForwardDispatch;
+
+        T* opCast() const
+        {
+            return this.ptr;
+        }
+    }
+
+    ref T opCast() //const
+    {
+        return this.obj;
     }
 
     public pragma(inline, true):
@@ -1426,7 +1433,7 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
 
 enum Dispatch;
 
-mixin template ForwardDispatch(frwAttr = Dispatch, const Bit addCasts = true)
+mixin template ForwardDispatch(frwAttr = Dispatch)
 {
     auto opDispatch(string called, Args...)(auto ref Args args)
     {
@@ -1467,25 +1474,20 @@ mixin template ForwardDispatch(frwAttr = Dispatch, const Bit addCasts = true)
                         {
                             static if (argsLen > 1)
                             {
-                                static if (__traits(compiles, mixin(mbr ~ "." ~ called)(forward!args)))
-                                {
-                                    return mixin(mbr ~ "." ~ called)(forward!args);
-                                }
+                                enum callStmt = "mixin(mbr ~ \".\" ~ called)(forward!args)";
                             }
                             else
                             {
-                                static if (__traits(compiles, mixin(mbr ~ "." ~ called ~ " = args[0]")))
-                                {
-                                    return mixin(mbr ~ "." ~ called ~ " = args[0]");
-                                }
+                                enum callStmt = "mixin(mbr ~ \".\" ~ called ~ \" = args[0]\")";
                             }
                         }
                         else
                         {
-                            static if (__traits(compiles, mixin(mbr ~ "." ~ called)))
-                            {
-                                return mixin(mbr ~ "." ~ called);
-                            }
+                            enum callStmt = "mixin(mbr ~ \".\" ~ called)";
+                        }
+                        static if (is(typeof(callStmt)) && __traits(compiles, mixin(callStmt)))
+                        {
+                            return mixin(callStmt);
                         }
                     }
                 }
