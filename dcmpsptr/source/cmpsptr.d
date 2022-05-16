@@ -1474,18 +1474,18 @@ mixin template ForwardDispatch(frwAttr = Dispatch)
                         {
                             static if (argsLen > 1)
                             {
-                                enum callStmt = "mixin(mbr ~ \".\" ~ called)(forward!args)";
+                                enum callStmt = q{mixin(mbr ~ "." ~ called)(forward!args)};
                             }
                             else
                             {
-                                enum callStmt = "mixin(mbr ~ \".\" ~ called ~ \" = args[0]\")";
+                                enum callStmt = q{mixin(mbr ~ "." ~ called ~ " = args[0]")};
                             }
                         }
                         else
                         {
-                            enum callStmt = "mixin(mbr ~ \".\" ~ called)";
+                            enum callStmt = q{mixin(mbr ~ "." ~ called)};
                         }
-                        static if (is(typeof(callStmt)) && __traits(compiles, mixin(callStmt)))
+                        static if (__traits(hasMember, P, called) || __traits(compiles, mixin(callStmt)))
                         {
                             return mixin(callStmt);
                         }
