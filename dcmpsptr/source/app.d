@@ -12,13 +12,35 @@ struct UnqTest
     }
 }
 
+struct NewTest
+{
+    SNr _n = 315;
+
+    SNr n()
+    {
+        return this._n;
+    }
+
+    void n(SNr n)
+    {
+        this._n = n;
+    }
+
+    ~this()
+    {
+        printf("NewTest destructor!\n");
+    }
+}
+
 struct RfcTest
 {
     public static const SNr[3] testArr = [9, 8, 7];
 
-    Ptr!(UnqTest, -1, -1) y = void;
-
+    @Dispatch Ptr!(UnqTest, Own.fixedUnique, Opt.lazyInit) y = void;
+    @Dispatch NewTest nTest;
     SNr x = void;
+
+    mixin ForwardDispatch;
 
     this(const SNr x, UnqTest* unqTest)
     {
@@ -27,16 +49,15 @@ struct RfcTest
         this.x = x;
     }
 
-    //@disable this();
+    @disable this();
 
     ~this()
     {
         printf("RfcTest destructor!\n");
-        //printf("y.z = %d", y.z);
     }
 }
 
-void testFunc(Ptr!(RfcTest, 1) tst, const UNr again)
+void testFunc(Ptr!(RfcTest, Own.sharedCounted, Opt.nullable) tst, const UNr again)
 {
     printf("before tst.count = %d\n", (tst.refCount));
     if (again < 3)
@@ -46,38 +67,42 @@ void testFunc(Ptr!(RfcTest, 1) tst, const UNr again)
     printf("after tst.count = %d\n", (tst.refCount));
 }
 
-void testHndlFunc(Hnl!("APP.RfcTest.testArr", "APP") tst)
+void testHndlFunc(Hnd!("APP.RfcTest.testArr", "APP") tst)
 {
     printf("APP.RfcTest.testArr.index = %d\n", (tst.index));
     printf("APP.RfcTest.testArr.sizeof = %d\n", (tst.sizeof));
 }
 
-extern (C) int main(string[] args) {
-    //UnqTest* unq = allocNew!UnqTest(783);
-    Ptr!UnqTest unq = allocNew!UnqTest(783);
-    printf("unq.sizeof = %d\n", unq.sizeof);
-    Ptr!RfcTest ptr = allocNew!RfcTest(137, unq);
-    printf("ptr.sizeof = %d\n", ptr.sizeof);
-    Ptr!(RfcTest, 1, 1) tst = nil;
+void doTests()
+{
+    UnqTest* unq = Mgr!COMPRESS_POINTERS.allocNew!UnqTest(783);
+    RfcTest* ptr = Mgr!COMPRESS_POINTERS.allocNew!RfcTest(137, unq);
+    Ptr!(RfcTest, Own.sharedCounted, Opt.nullable) tst = nil;
     auto rfc = tst.ptrOrElse((RfcTest* ptr) { return ptr; }, ptr);    
     SNr nr = 1000;
     SNr no = 2000;
-    tst.call((ref RfcTest r, SNr nr, SNr no) { auto z = r.y.z;
-                                               printf("CALL: %d + %d + %d = %d\n", z, nr, no, r.y.z + nr + no);
-                                             }, nr, no);
-    //printf("z = %d\n", z);
-    printf("rfc.x = %d\n", rfc.x);
+    tst((ref RfcTest r, SNr nr, SNr no) {   auto z = r.z;
+                                            printf("CALL: %d + %d + %d = %d\n", z, nr, no, z + nr + no);
+                                        }, nr, no);
+    printf("tst.n = %d\n", tst.n);
     printf("before tst.count = %d\n", (tst.refCount));
     testFunc(tst, 0);
     printf("after tst.count = %d\n", (tst.refCount));
     printf("tst.x = %d\n", tst.x);
     tst.x = 873;
-    printf("tst.x = %d\n", tst.x);
+    printf("rfc.x = %d\n", rfc.x);
     printf("tst.sizeof = %d\n", tst.sizeof);
-    //Hnl!("APP.RfcTest.testArr", "APP") testArr = 2;
-    Hnl!("APP.RfcTest.testArr", "APP") testArr = &(APP.RfcTest.testArr[2]);
-    testHndlFunc(testArr);
-    SNr testArrElm = testArr;
-    printf("testArr = %d\n", testArrElm);
+    Hnd!("APP.RfcTest.testArr", "APP") testArr1 = 1;
+    Hnd!("APP.RfcTest.testArr", "APP") testArr2 = &(APP.RfcTest.testArr[2]);
+    testHndlFunc(testArr1);
+    testHndlFunc(testArr2);
+    SNr testArrElm = testArr1;
+    printf("testArr1 = %d\n", testArrElm);
+    printf("testArr2 = %d\n", cast(SNr)testArr2);
+}
+
+extern (C) int main(string[] args)
+{
+    doTests;
     return 0;
 }
