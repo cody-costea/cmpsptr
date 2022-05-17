@@ -99,7 +99,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
     @trusted static CmpsPtr makeNew(T, Args...)(auto ref Args args)
     {
-        return (CmpsPtr(Mgr!(cmpsType).allocNew!T(forward!args)));
+        return (CmpsPtr(Mgr!cmpsType.allocNew!T(forward!args)));
     }
 
     protected pragma(inline, true)
@@ -158,10 +158,18 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
         }
     }
-    
-    public @trusted this(P)(P* ptr) if (is(P == T))
+
+    public
     {
-        this.ptr!(P, false)(ptr);
+        @Dispatch @trusted T* ptr() const @nogc nothrow
+        {
+            return this.addr;
+        }
+    
+        @trusted this(P)(P* ptr) if (is(P == T))
+        {
+            this.ptr!(P, false)(ptr);
+        }
     }
 
     static if (opt)
@@ -458,7 +466,6 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
         }
 
-        //pragma(inline, true)
         @trusted public void ptr(P, const Bit remove = true)(P* ptr) if (is(P == T) || is(P == Nil))
         {
             static if (remove)
@@ -628,11 +635,6 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         }
     }
 
-    ref T opCast() //const
-    {
-        return this.obj;
-    }
-
     public pragma(inline, true):
     static if (own < 0)
     {
@@ -749,11 +751,6 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
     public
     {
-        public @Dispatch @trusted T* ptr() const @nogc nothrow
-        {
-            return this.addr;
-        }
-
         static if (copyable)
         {
             @trusted CmpsPtr clone() const
@@ -761,21 +758,19 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 return CmpsPtr(Mgr!cmpsType.allocNew!T(*this.addr));
             }
         }
-        /*static if (own != -1)
-        {*/
-            @trusted void opAssign(P)(P* ptr) if (is(P == T) && own != -1)
-            {
-                this.copy!P(ptr);
-            }
 
-            static if (opt > 0 && own != -1)
+        @trusted void opAssign(P)(P* ptr) if (is(P == T) && own != -1)
+        {
+            this.copy!P(ptr);
+        }
+
+        static if (opt > 0 && own != -1)
+        {
+            @trusted void opAssign(Nil)
             {
-                @trusted void opAssign(Nil)
-                {
-                    this.copy!T(nil);
-                }
+                this.copy!T(nil);
             }
-        //}
+        }
 
         @trusted CmpsPtr!(T, Own.borrowed, Opt.nullable, track, implicitCast, cmpsType) borrow() //const
         {
@@ -943,7 +938,6 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             return *(this.addrOrNew(forward!args));
         }
 
-        //import std.traits : isCallable;
         @trusted ReturnType!F call(F, Args...)(F fn, auto ref Args args) //if (isCallable!F)
         {
             auto ptr = this.addr;
@@ -1260,7 +1254,7 @@ else
     }
 }
 
-struct IdxHndl(string array, string arrayModule = "", U = Idx)
+struct IdxHndl(string array, string arrayModule = "", U = Idx, const Bit compress = true, const Bit implicitCast = true)
 {
     static if (arrayModule.length > 0 && arrayModule != "cmpsptr")
     {
@@ -1268,7 +1262,15 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
     }
     private:
     alias T = mixin("typeof(" ~ array ~ "[0])");
-    @safe static U findIdx(T* ptr) @nogc nothrow
+    static if (compress && !is(T == const))
+    {
+        alias P = CmpsPtr!(T, Own.borrowed, Optionality.nonNull, false, true);
+    }
+    else
+    {
+        alias P = T*;
+    }
+    @safe static U findIdx(T* ptr) //@nogc nothrow
     {
         mixin("auto arr = &" ~ array ~ q{;
                import std.traits;
@@ -1298,23 +1300,13 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
     }
 
     pragma(inline, true):
-    static if (U.sizeof < (void*).sizeof)
+    static if (U.sizeof < P.sizeof)
     {
         U _idx = void;
 
-        @safe void copy(T* ptr) @nogc nothrow
+        @safe void copy(T* ptr) //@nogc nothrow
         {
-            /*import std.traits;
-            mixin("auto arr = &" ~ array ~ ";");
-            static if (isStaticArray!(typeof(*arr)))
-            {
-                enum i = findIdx(ptr);
-                this._idx = i;
-            }
-            else
-            {*/
-                this._idx = this.findIdx(ptr);
-            //}
+            this._idx = this.findIdx(ptr);
         }
 
         @safe void copy(U idx) @nogc nothrow
@@ -1328,17 +1320,17 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
         }*/
 
         public:
-        @safe ref T obj() @nogc nothrow
+        @safe @Dispatch ref T obj() const @nogc nothrow
         {
             mixin("return " ~ array ~ "[this._idx];");
         }
 
-        @safe T* ptr() @nogc nothrow
+        @safe T* ptr() const @nogc nothrow
         {
             mixin("return &(" ~ array ~ "[this._idx]);");
         }
 
-        @system U index() @nogc nothrow
+        @system U index() const @nogc nothrow
         {
             return this._idx;
         }
@@ -1346,14 +1338,14 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
     else
     {
         private:
-        T* _ptr = void;
+        P _ptr = void;
         
-        @safe void copy(U idx) @nogc nothrow
+        @safe void copy(U idx) //@nogc nothrow
         {
             mixin("this._ptr = &(" ~ array ~ "[idx]);");
         }
         
-        @safe void copy(T* ptr) @nogc nothrow
+        @safe void copy(T* ptr) //@nogc nothrow
         {
             this._ptr = ptr;
         }
@@ -1364,17 +1356,17 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
         }*/
 
         public:
-        @safe ref T obj() @nogc nothrow
+        @safe @Dispatch ref T obj() const @nogc nothrow
         {
             return *this._ptr;
         }
         
-        @safe T* ptr() @nogc nothrow
+        @safe T* ptr() const @nogc nothrow
         {
             return this._ptr;
         }
 
-        @system U index() @nogc nothrow
+        @system U index() const //@nogc nothrow
         {
             return findIdx(this._ptr);
         }
@@ -1386,12 +1378,12 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
     }*/
 
     public:
-    @safe void opAssign(U idx) @nogc nothrow
+    @safe void opAssign(U idx) //@nogc nothrow
     {
         this.copy(idx);
     }
 
-    @safe void opAssign(T* ptr) @nogc nothrow
+    @safe void opAssign(T* ptr) //@nogc nothrow
     {
         this.copy(ptr);
     }
@@ -1406,12 +1398,12 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
         this.copy(obj);
     }*/
 
-    @safe this(U idx) @nogc nothrow
+    @safe this(U idx) //@nogc nothrow
     {
         this.copy(idx);
     }
 
-    @safe this(T* ptr) @nogc nothrow
+    @safe this(T* ptr) //@nogc nothrow
     {
         this.copy(ptr);
     }
@@ -1428,7 +1420,19 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx)
 
     @disable this();
     
-    alias obj this;
+    static if (implicitCast)
+    {
+        alias obj this;
+    }
+    else
+    {
+        mixin ForwardDispatch;
+
+        ref T opCast() const
+        {
+            return this.obj;
+        }
+    }
 }
 
 enum Dispatch;
@@ -1485,7 +1489,7 @@ mixin template ForwardDispatch(frwAttr = Dispatch)
                         {
                             enum callStmt = q{mixin(mbr ~ "." ~ called)};
                         }
-                        static if (__traits(hasMember, P, called) || __traits(compiles, mixin(callStmt)))
+                        static if (/*__traits(hasMember, P, called) ||*/__traits(compiles, mixin("(" ~ callStmt ~ ")")))
                         {
                             return mixin(callStmt);
                         }
@@ -1496,4 +1500,4 @@ mixin template ForwardDispatch(frwAttr = Dispatch)
     }
 }
 
-alias Hnl = IdxHndl;
+alias Hnd = IdxHndl;
