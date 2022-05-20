@@ -1257,26 +1257,26 @@ else
 struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implicitCast = true, C = void)
 {
     private:
-
+    alias O = typeof(array[0]);
     static if (is(C == void))
     {
-        alias T = typeof(array[0]);
+        alias T = O;
     }
     else
     {
         alias T = C;
     }
 
-    static if (compress && !is(T == const))
+    static if (compress && !is(O == const))
     {
-        alias P = CmpsPtr!(T, Own.borrowed, Optionality.nonNull, false, true);
+        alias P = CmpsPtr!(O, Own.borrowed, Optionality.nonNull, false, true);
     }
     else
     {
-        alias P = T*;
+        alias P = O*;
     }
 
-    @safe static U findIdx(T* ptr) //@nogc nothrow
+    @safe static U findIdx(O* ptr) //@nogc nothrow
     {
         import std.traits;
         static if (isArray!(typeof(array)))
@@ -1310,7 +1310,7 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
 
         @safe void copy(T* ptr) //@nogc nothrow
         {
-            this._idx = this.findIdx(ptr);
+            this._idx = this.findIdx(cast(O*)ptr);
         }
 
         @safe void copy(U idx) @nogc nothrow
@@ -1326,12 +1326,12 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
         public:
         @safe @Dispatch ref T obj() const @nogc nothrow
         {
-            return array[this._idx];
+            return cast(T)array[this._idx];
         }
 
         @safe T* ptr() const @nogc nothrow
         {
-            return &(array[this._idx]);
+            return &(this.obj());
         }
 
         @system U index() const @nogc nothrow
@@ -1351,7 +1351,7 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
         
         @safe void copy(T* ptr) //@nogc nothrow
         {
-            this._ptr = ptr;
+            this._ptr = cast(O*)ptr;
         }
         
         /*@safe void copy(ref return scope IdxHndl copy) @nogc nothrow
@@ -1362,12 +1362,12 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
         public:
         @safe @Dispatch ref T obj() const @nogc nothrow
         {
-            return *this._ptr;
+            return *(this.ptr);
         }
         
         @safe T* ptr() const @nogc nothrow
         {
-            return this._ptr;
+            return cast(T*)this._ptr;
         }
 
         @system U index() const //@nogc nothrow
