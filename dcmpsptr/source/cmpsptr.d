@@ -97,7 +97,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     static assert (own != Own.cowCounted || copyable, "Only copyable types can have copy-on-write pointers.");
     static assert (!(is(typeof(this) == shared) || is(T == shared)), "Compressed pointers cannot be shared.");
 
-    @trusted static CmpsPtr makeNew(T, Args...)(auto ref Args args)
+    @trusted static CmpsPtr makeNew(Args...)(auto ref Args args)
     {
         return (CmpsPtr(Mgr!cmpsType.allocNew!T(forward!args)));
     }
@@ -1254,14 +1254,19 @@ else
     }
 }
 
-struct IdxHndl(string array, string arrayModule = "", U = Idx, const Bit compress = true, const Bit implicitCast = true)
+struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implicitCast = true, C = void)
 {
-    static if (arrayModule.length > 0 && arrayModule != "cmpsptr")
-    {
-        mixin("import " ~ arrayModule ~";");
-    }
     private:
-    alias T = mixin("typeof(" ~ array ~ "[0])");
+
+    static if (is(C == void))
+    {
+        alias T = typeof(array[0]);
+    }
+    else
+    {
+        alias T = C;
+    }
+
     static if (compress && !is(T == const))
     {
         alias P = CmpsPtr!(T, Own.borrowed, Optionality.nonNull, false, true);
@@ -1270,32 +1275,31 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx, const Bit compres
     {
         alias P = T*;
     }
+
     @safe static U findIdx(T* ptr) //@nogc nothrow
     {
-        mixin("auto arr = &" ~ array ~ q{;
-               import std.traits;
-               static if (isArray!(typeof(*arr)))
-               {
-                   enum objSize = T.sizeof;
-                   auto idPtr = cast(PNr)ptr;
-                   auto arPtr = cast(PNr)arr.ptr;
-                   if (idPtr >= arPtr && idPtr < arPtr + (arr.length * objSize))
-                   {
-                       return cast(U)((idPtr - arPtr) / objSize);
-                   }
-               }
-               else
-               {
-                   const auto arrLn = arr.length;
-                   for (U i = 0; i < arrLn; ++i)
-                   {
-                       if (&((*arr)[i]) == ptr)
-                       {
-                           return i;
-                       }
-                   }
-               }
-        });
+        import std.traits;
+        static if (isArray!(typeof(array)))
+        {
+            enum objSize = T.sizeof;
+            auto idPtr = cast(PNr)ptr;
+            auto arPtr = cast(PNr)array.ptr;
+            if (idPtr >= arPtr && idPtr < arPtr + (array.length * objSize))
+            {
+                return cast(U)((idPtr - arPtr) / objSize);
+            }
+        }
+        else
+        {
+            const auto arrLn = array.length;
+            for (U i = 0; i < arrLn; ++i)
+            {
+                if (&(array[i]) == ptr)
+                {
+                    return i;
+                }
+            }
+        }
         return cast(U)-1;
     }
 
@@ -1322,12 +1326,12 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx, const Bit compres
         public:
         @safe @Dispatch ref T obj() const @nogc nothrow
         {
-            mixin("return " ~ array ~ "[this._idx];");
+            return array[this._idx];
         }
 
         @safe T* ptr() const @nogc nothrow
         {
-            mixin("return &(" ~ array ~ "[this._idx]);");
+            return &(array[this._idx]);
         }
 
         @system U index() const @nogc nothrow
@@ -1342,7 +1346,7 @@ struct IdxHndl(string array, string arrayModule = "", U = Idx, const Bit compres
         
         @safe void copy(U idx) //@nogc nothrow
         {
-            mixin("this._ptr = &(" ~ array ~ "[idx]);");
+            this._ptr = &(array[idx]);
         }
         
         @safe void copy(T* ptr) //@nogc nothrow
@@ -1478,18 +1482,18 @@ mixin template ForwardDispatch(frwAttr = Dispatch)
                         {
                             static if (argsLen > 1)
                             {
-                                enum callStmt = q{mixin(mbr ~ "." ~ called)(forward!args)};
+                                enum callStmt = "(" ~ q{mixin(mbr ~ "." ~ called)(forward!args)} ~ ")";
                             }
                             else
                             {
-                                enum callStmt = q{mixin(mbr ~ "." ~ called ~ " = args[0]")};
+                                enum callStmt = "(" ~ q{mixin(mbr ~ "." ~ called ~ " = args[0]")} ~ ")";
                             }
                         }
                         else
                         {
-                            enum callStmt = q{mixin(mbr ~ "." ~ called)};
+                            enum callStmt = "(" ~ q{mixin(mbr ~ "." ~ called)} ~ ")";
                         }
-                        static if (/*__traits(hasMember, P, called) ||*/__traits(compiles, mixin("(" ~ callStmt ~ ")")))
+                        static if (/*__traits(hasMember, P, called) ||*/__traits(compiles, mixin(callStmt)))
                         {
                             return mixin(callStmt);
                         }
