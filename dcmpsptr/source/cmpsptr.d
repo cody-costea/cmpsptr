@@ -25,7 +25,9 @@ The following negative values can also be used, but they are not safe and will l
     -4 can compress addresses up to 32GB, at the expense of the 3 lower tag bits, which can no longer be used for other purporses
     -3 can compress addresses up to 16GB, at the expense of the 2 lower tag bits, which can no longer be used for other purporses
     -2 can compress addresses up to 8GB, at the expense of the lower tag bit, which can no longer be used for other purporses
-    -1 can compress addresses up to 4GB, leaving the 3 lower tag bits to be used for other purporses
+    -1 can compress addresses up to 4GB, leaving the 4 lower tag bits to be used for other purporses
+If a value higher or lower than those mentioned is set, on Windows and Posix systems, the allocation functions defined in this module, will attempt to
+request aligned memory from the operating system, so that the specified number of low bits is available for shifting. This is however not recommended.
 */
 version(D_BetterC)
 {
@@ -1259,6 +1261,7 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
 {
     private:
     alias O = typeof(array[0]);
+
     static if (is(C == void))
     {
         alias T = O;
@@ -1383,11 +1386,6 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
     }*/
 
     public:
-    @safe ref T objectRef() const @nogc nothrow
-    {
-        return this.obj;
-    }
-
     @safe void opAssign(U idx) //@nogc nothrow
     {
         this.copy(idx);
@@ -1489,7 +1487,8 @@ mixin template ForwardDispatch(frwAttr = Dispatch)
                         {
                             static if (argsLen > 1)
                             {
-                                enum callStmt = "(" ~ q{mixin(mbr ~ "." ~ called)(forward!args)} ~ ")";
+                                import core.lifetime : forward;
+                                enum callStmt = "(" ~ q{mixin(mbr ~ "." ~ called ~ "(forward!args)")} ~ ")";
                             }
                             else
                             {
@@ -1520,7 +1519,8 @@ mixin template ForwardTo(alias mbr)
         {
             static if (argsLen > 1)
             {
-                return mixin("mbr." ~ called)(forward!args);
+                import core.lifetime : forward;
+                return mixin("mbr." ~ called ~ "(forward!args)");
             }
             else
             {
