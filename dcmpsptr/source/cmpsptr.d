@@ -627,7 +627,8 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     }
     else
     {
-        mixin ForwardDispatch;
+        mixin ForwardTo!ptr;
+        //mixin ForwardDispatch;
 
         T* opCast() const
         {
@@ -1269,7 +1270,7 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
 
     static if (compress && !is(O == const))
     {
-        alias P = CmpsPtr!(O, Own.borrowed, Optionality.nonNull, false, true);
+        alias P = CmpsPtr!(O, Own.borrowed, Optionality.nullable, false, true);
     }
     else
     {
@@ -1281,7 +1282,7 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
         import std.traits;
         static if (isArray!(typeof(array)))
         {
-            enum objSize = T.sizeof;
+            enum objSize = O.sizeof;
             auto idPtr = cast(PNr)ptr;
             auto arPtr = cast(PNr)array.ptr;
             if (idPtr >= arPtr && idPtr < arPtr + (array.length * objSize))
@@ -1365,14 +1366,14 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
             return *(this.ptr);
         }
         
-        @safe T* ptr() const @nogc nothrow
+        @trusted T* ptr() const @nogc nothrow
         {
             return cast(T*)this._ptr;
         }
 
         @system U index() const //@nogc nothrow
         {
-            return findIdx(this._ptr);
+            return findIdx(cast(O*)this._ptr);
         }
     }
 
@@ -1382,6 +1383,11 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
     }*/
 
     public:
+    @safe ref T objectRef() const @nogc nothrow
+    {
+        return this.obj;
+    }
+
     @safe void opAssign(U idx) //@nogc nothrow
     {
         this.copy(idx);
@@ -1430,7 +1436,8 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
     }
     else
     {
-        mixin ForwardDispatch;
+        mixin ForwardTo!obj;
+        //mixin ForwardDispatch;
 
         ref T opCast() const
         {
@@ -1500,6 +1507,29 @@ mixin template ForwardDispatch(frwAttr = Dispatch)
                     }
                 }
             }
+        }
+    }
+}
+
+mixin template ForwardTo(alias mbr)
+{
+    auto opDispatch(string called, Args...)(auto ref Args args)
+    {
+        enum argsLen = args.length;
+        static if (argsLen > 0)
+        {
+            static if (argsLen > 1)
+            {
+                return mixin("mbr." ~ called)(forward!args);
+            }
+            else
+            {
+                return mixin("mbr." ~ called ~ " = args[0]");
+            }
+        }
+        else
+        {
+            return mixin("mbr." ~ called);
         }
     }
 }
