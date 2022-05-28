@@ -448,11 +448,11 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     (*ptrList)[i] = ptr;
                     static if (ONLY_LIST)
                     {
-                        this._ptr = i;
+                        this._ptr = i + 1U;
                     }
                     else
                     {
-                        this._ptr = (i << 1U) | 1U;
+                        this._ptr = ((i + 1U) << 1U) | 1U;
                     }
                     return;
                 }
@@ -460,11 +460,11 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             ptrList.insert(ptr);
             static if (ONLY_LIST)
             {
-                this._ptr = cast(U)(ptrLength + 1);
+                this._ptr = cast(U)(ptrLength + 1U);
             }
             else
             {
-                this._ptr = cast(U)(((ptrLength + 1) << 1) | 1);
+                this._ptr = cast(U)(((ptrLength + 1U) << 1U) | 1U);
             }
         }
 
@@ -636,6 +636,59 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         {
             return this.ptr;
         }
+
+        static if (opt)
+        {
+            private @system void copy(const Bit remove = true)(ref return scope CmpsPtr!(T,
+                                      own, Opt.nonNull, track, false, cmpsType, U) copy) //@nogc nothrow
+            {
+                static if (own || cmpsType < 1)
+                {
+                    this._ptr = copy._ptr;
+                    static if (own > 0)
+                    {
+                        this.count = copy.count;
+                        this.increase;
+                    }
+                }
+                else
+                {
+                    this.ptr!(T, remove) = copy.ptr;
+                }
+            }
+
+            static if (own != -1)
+            {
+                @trusted void opAssign(ref return scope CmpsPtr!(T, own, Opt.nonNull, track, false, cmpsType, U) copy)
+                {
+                    static if (own < -1)
+                    {                        
+                        auto oPtr = this._ptr;
+                    }
+                    this.copy!true(forward!copy);
+                    static if (own < -1)
+                    {
+                        copy._ptr = oPtr;
+                    }
+                }
+            }
+
+            @trusted this(ref return scope CmpsPtr!(T, own, Opt.nonNull, track, false, cmpsType, U) copy) //@nogc nothrow
+            {
+                this.copy!false(forward!copy);
+                static if (own < - 1)
+                {
+                    static if (cmpsType)
+                    {
+                        copy._ptr = 0U;
+                    }
+                    else
+                    {
+                        copy._ptr = nil;
+                    }
+                }
+            }
+        }
     }
 
     public pragma(inline, true):
@@ -651,6 +704,13 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         @trusted ~this() //@nogc nothrow
         {
             this.decrease;
+        }
+    }
+    else static if (cmpsType > 0)
+    {
+        @trusted ~this() //@nogc nothrow
+        {
+            this.clearList(this._ptr);
         }
     }
 
@@ -674,32 +734,39 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         @trusted void opAssign(ref return scope CmpsPtr copy)
         {
             this.ptr = copy.ptr;
-            this.copy(copy);
+            this.copy(forward!copy);
         }
 
         @trusted this(ref return scope CmpsPtr copy) //@nogc nothrow
         {
             this.ptr!(T, false) = copy.ptr;
-            this.copy(copy);
+            this.copy(forward!copy);
         }
     }
-    /*else static if (own == 0)
+    else static if (own == 0)
     {
-        private @system void copy(ref return scope CmpsPtr copy) //@nogc nothrow
+        private @system void copy(const Bit remove = true)(ref return scope CmpsPtr copy) //@nogc nothrow
         {
-            this._ptr = copy._ptr;
+            static if (cmpsType > 0)
+            {
+                this.ptr!(T, remove) = copy.ptr;
+            }
+            else
+            {
+                this._ptr = copy._ptr;
+            }
         }
 
         @trusted void opAssign(ref return scope CmpsPtr copy)
         {
-            this.copy(copy);
+            this.copy!true(forward!copy);
         }
 
         @trusted this(ref return scope CmpsPtr copy) //@nogc nothrow
         {
-            this.copy(copy);
+            this.copy!false(forward!copy);
         }
-    }*/
+    }
     else static if (own == -1)
     {
         @disable this(ref return scope CmpsPtr copy);
@@ -1273,7 +1340,7 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
 
     static if (compress && !is(O == const))
     {
-        alias P = CmpsPtr!(O, Own.borrowed, Optionality.nullable, false, true);
+        alias P = CmpsPtr!(O, Own.borrowed, Optionality.nonNull, false, true);
     }
     else
     {
@@ -1322,10 +1389,10 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
             this._idx = idx;
         }
         
-        /*@safe void copy(ref return scope IdxHndl copy) @nogc nothrow
+        @safe void copy(ref return scope IdxHndl copy) //@nogc nothrow
         {
             this._idx = copy._idx;
-        }*/
+        }
 
         public:
         @safe @Dispatch ref T obj() const @nogc nothrow
@@ -1358,10 +1425,10 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
             this._ptr = cast(O*)ptr;
         }
         
-        /*@safe void copy(ref return scope IdxHndl copy) @nogc nothrow
+        @safe void copy(ref return scope IdxHndl copy) //@nogc nothrow
         {
             this._ptr = copy._ptr;
-        }*/
+        }
 
         public:
         @safe @Dispatch ref T obj() const @nogc nothrow
@@ -1380,10 +1447,10 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
         }
     }
 
-    /*void copy(ref T obj) @nogc nothrow
+    void copy(ref T obj) //@nogc nothrow
     {
         this.copy(&obj);
-    }*/
+    }
 
     public:
     @safe void opAssign(U idx) //@nogc nothrow
@@ -1396,12 +1463,12 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
         this.copy(ptr);
     }
 
-    /*@safe void opAssign(ref return scope IdxHndl copy) @nogc nothrow
+    @safe void opAssign(ref return scope IdxHndl copy) //@nogc nothrow
     {
         this.copy(ptr);
     }
 
-    @system void opAssign(ref T obj) @nogc nothrow
+    /*@trusted void opAssign(ref T obj) @nogc nothrow
     {
         this.copy(obj);
     }*/
@@ -1416,12 +1483,12 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
         this.copy(ptr);
     }
 
-    /*@safe this(ref return scope IdxHndl copy) @nogc nothrow
+    @safe this(ref return scope IdxHndl copy) //@nogc nothrow
     {
         this.copy(ptr);
     }
 
-    @system this(ref T obj) @nogc nothrow
+    /*@system this(ref T obj) @nogc nothrow
     {
         this.copy(obj);
     }*/

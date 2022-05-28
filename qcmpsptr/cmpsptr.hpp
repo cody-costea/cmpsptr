@@ -530,9 +530,9 @@ namespace cmpsptr
                 if (ptrList->at(i) == nullptr)
                 {
                     //_null_idx = i == ptrListLen - 1 ? 0U : i + 1U;
-                    ptrList->operator[](i) = const_cast<void*>(reinterpret_cast<const void*>(ptr));
+                    ptrList->operator[](i++) = const_cast<void*>(reinterpret_cast<const void*>(ptr));
                     this->_ptr = (i << 1U) | 1U;
-                    _null_idx = i + 1U;
+                    _null_idx = i;
                     return;
                 }
             }
