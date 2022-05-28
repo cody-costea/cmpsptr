@@ -636,62 +636,61 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         {
             return this.ptr;
         }
+    }
 
-        static if (opt)
+    public pragma(inline, true):
+    static if (opt)
+    {
+        private @system void copy(const Bit remove = true)(ref return scope CmpsPtr!(T,
+                                    own, Opt.nonNull, track, false, cmpsType, U) copy) //@nogc nothrow
         {
-            private @system void copy(const Bit remove = true)(ref return scope CmpsPtr!(T,
-                                      own, Opt.nonNull, track, false, cmpsType, U) copy) //@nogc nothrow
+            static if (own || cmpsType < 1)
             {
-                static if (own || cmpsType < 1)
+                this._ptr = copy._ptr;
+                static if (own > 0)
                 {
-                    this._ptr = copy._ptr;
-                    static if (own > 0)
-                    {
-                        this.count = copy.count;
-                        this.increase;
-                    }
+                    this.count = copy.count;
+                    this.increase;
+                }
+            }
+            else
+            {
+                this.ptr!(T, remove) = copy.ptr;
+            }
+        }
+
+        static if (own != -1)
+        {
+            @trusted void opAssign(ref return scope CmpsPtr!(T, own, Opt.nonNull, track, false, cmpsType, U) copy)
+            {
+                static if (own < -1)
+                {                        
+                    auto oPtr = this._ptr;
+                }
+                this.copy!true(forward!copy);
+                static if (own < -1)
+                {
+                    copy._ptr = oPtr;
+                }
+            }
+        }
+
+        @trusted this(ref return scope CmpsPtr!(T, own, Opt.nonNull, track, false, cmpsType, U) copy) //@nogc nothrow
+        {
+            this.copy!false(forward!copy);
+            static if (own < - 1)
+            {
+                static if (cmpsType)
+                {
+                    copy._ptr = 0U;
                 }
                 else
                 {
-                    this.ptr!(T, remove) = copy.ptr;
-                }
-            }
-
-            static if (own != -1)
-            {
-                @trusted void opAssign(ref return scope CmpsPtr!(T, own, Opt.nonNull, track, false, cmpsType, U) copy)
-                {
-                    static if (own < -1)
-                    {                        
-                        auto oPtr = this._ptr;
-                    }
-                    this.copy!true(forward!copy);
-                    static if (own < -1)
-                    {
-                        copy._ptr = oPtr;
-                    }
-                }
-            }
-
-            @trusted this(ref return scope CmpsPtr!(T, own, Opt.nonNull, track, false, cmpsType, U) copy) //@nogc nothrow
-            {
-                this.copy!false(forward!copy);
-                static if (own < - 1)
-                {
-                    static if (cmpsType)
-                    {
-                        copy._ptr = 0U;
-                    }
-                    else
-                    {
-                        copy._ptr = nil;
-                    }
+                    copy._ptr = nil;
                 }
             }
         }
     }
-
-    public pragma(inline, true):
     static if (own < 0)
     {
         @trusted ~this() //@nogc nothrow
