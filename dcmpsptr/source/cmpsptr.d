@@ -846,6 +846,26 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             return CmpsPtr!(T, Own.borrowed, Opt.nullable, track, implicitCast, cmpsType)(this._ptr);
         }
 
+        @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowNonNull() //const
+        {
+            //this.obj;
+            auto ptr = this._ptr;
+            assert(ptr, "Non-nullable pointers cannot be null.");
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(ptr);
+        }
+
+        @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowOrNew(Args...)(auto ref Args args)
+        {
+            this.addrOrNew(forward!args);
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this._ptr);
+        }
+
+        @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowOrElse(F, Args...)(F fn, auto ref Args args)
+        {
+            this.addrOrElse((fn, forward!args));
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this._ptr);
+        }
+
         static if (opt)
         {
             @trusted ref T obj()
@@ -1016,26 +1036,61 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
         }
 
-        @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) nonNull()
+        static if (own != -1)
         {
-            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(&(this.obj()));
-        }
+            private
+            {
+                @trusted void applyCopy(P)(P copy)
+                {
+                    static if (own > 0)
+                    {
+                        copy.count = this.count;
+                        this.increase;
+                    }
+                    else static if (own < -1)
+                    {
+                        this._ptr = 0U;
+                    }
+                }
 
-        @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) nonNullOrNew(Args...)(auto ref Args args)
-        {
-            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(&(this.objOrNew(forward!args)));
-        }
+                @trusted CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) getNonNull()
+                {
+                    auto cmpsPtr = CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType)(this._ptr);
+                    this.applyCopy(cmpsPtr);
+                    return cmpsPtr;
+                }
+            }
 
-        @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) nonNullOrElse(F, Args...)(F fn, auto ref Args args)
-        {
-            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(&(this.objOrElse(fn, forward!args)));
+            @trusted CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) nonNull()
+            {
+                this.obj;
+                return this.getNonNull;
+            }
+
+            @trusted CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) nonNullOrNew(Args...)(auto ref Args args)
+            {
+                this.addrOrNew(forward!args);
+                return this.getNonNull;
+            }
+
+            @trusted CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) nonNullOrElse(F, Args...)(F fn, auto ref Args args)
+            {
+                this.addrOrElse((fn, forward!args));
+                return this.getNonNull;
+            }
+
+            @trusted CmpsPtr!(T, own, Opt.nullable, track, implicitCast, cmpsType) nullable()
+            {
+                auto cmpsPtr = CmpsPtr!(T, own, Opt.nullable, track, implicitCast, cmpsType)(this._ptr);
+                this.applyCopy(cmpsPtr);
+                return cmpsPtr;
+            }
         }
 
         @trusted ReturnType!F opCall(F, Args...)(F fn, auto ref Args args)
         {
             return this.call(fn, forward!args);
         }
-
         @safe Bit opEquals()(auto ref const CmpsPtr cmp) const @nogc nothrow
         {
             return this._ptr == cmp._ptr;
@@ -1339,7 +1394,8 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
 
     static if (compress && !is(O == const))
     {
-        alias P = CmpsPtr!(O, Own.borrowed, Optionality.nonNull, false, true);
+        alias P = CmpsPtr!(O, Own.borrowed, Optionality.nonNull, false, true, (COMPRESS_POINTERS > 2
+                           ? 3 : (COMPRESS_POINTERS < -1 ? -2 : COMPRESS_POINTERS))); //Arrays can have some tagged low bits;
     }
     else
     {
