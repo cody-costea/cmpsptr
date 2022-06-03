@@ -97,7 +97,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     enum copyable = __traits(isCopyable, T);
     enum constructible = __traits(compiles, T());
     static assert (own != Own.cowCounted || copyable, "Only copyable types can have copy-on-write pointers.");
-    static assert (!(is(typeof(this) == shared) || is(T == shared)), "Compressed pointers cannot be shared.");
+    static assert (cmpsType > 0 && (!(is(typeof(this) == shared) || is(T == shared))), "Compressed pointers cannot be shared.");
 
     @trusted static CmpsPtr makeNew(Args...)(auto ref Args args)
     {
@@ -129,7 +129,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         {
             @system void clean()
             {
-                Mgr!(cmpsType).erase!(T, true)(this.addr);
+                Mgr!cmpsType.erase!(T, true)(this.addr);
                 static if (cmpsType)
                 {
                     static if (cmpsType > 0)
@@ -259,7 +259,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 {
                     this.clean;
                     count.ptr!ZNr = nil;
-                    Mgr!(cmpsType).erase!(ZNr, false)(cntPtr);
+                    Mgr!COMPRESS_POINTERS.erase!(ZNr, false)(cntPtr);
                 }
                 else //if (cntNr > 1)
                 {
@@ -612,6 +612,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                         {
                             import std.format : format;
                             assert(0, format("Pointer address %ull cannot be compressed.", ptrNr));
+                            this._ptr = 0U;
                         }
                     }
                 }
@@ -969,8 +970,9 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                                 }
                                 else
                                 {
+                                    this.clean;
                                     count.ptr!ZNr = nil;
-                                    Mgr!(cmpsType).erase!(ZNr, false)(cntPtr);
+                                    Mgr!COMPRESS_POINTERS.erase!(ZNr, false)(cntPtr);
                                 }
                                 count = nil;
                             }
@@ -1091,6 +1093,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         {
             return this.call(fn, forward!args);
         }
+
         @safe Bit opEquals()(auto ref const CmpsPtr cmp) const @nogc nothrow
         {
             return this._ptr == cmp._ptr;
@@ -1230,11 +1233,11 @@ public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignByte
             (*ptr) = nil;
         }
 
-        @system void clear(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
+        /*@system void clear(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
         {
             ptr.erase!(T, check);
             ptr.ptr = nil;
-        }
+        }*/
 
         @system void erase(T, const Bit check = false)(T* ptr, const SNr qty = 1)
         {
@@ -1249,55 +1252,48 @@ public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignByte
             }
             else
             {
-                //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)
+                version(Posix)
+                {
+                    static if (ptrAlignBytes)
+                    {
+                        ptr.free;
+                    }
+                    else
+                    {
+                        //Source: $(PHOBOSSRC std/experimental/allocator/_mmap_allocator.d)
+                        import core.sys.posix.sys.mman : munmap;
+                        ptr.munmap(T.sizeof * qty);
+                    }
+                }
                 version(Windows)
                 {
-                    
-                }
-                else
-                {
-                    version(Posix)
+                    static if (ptrAlignBytes == 0)
                     {
-                        static if (ptrAlignBytes)
-                        {
-                            ptr.free;
-                        }
-                        else
-                        {
-                            //Source: $(PHOBOSSRC std/experimental/allocator/_mmap_allocator.d)
-                            import core.sys.posix.sys.mman : munmap;
-                            ptr.munmap(T.sizeof * qty);
-                        }
+                        //Source: $(PHOBOSSRC std/experimental/allocator/_mmap_allocator.d)
+                        import core.sys.windows.winnt : MEM_RELEASE;
+                        ptr.VirtualFree(0, MEM_RELEASE);
                     }
-                    version(Windows)
+                    else static if (ptrAlignBytes > 0)
                     {
-                        static if (ptrAlignBytes == 0)
-                        {
-                            //Source: $(PHOBOSSRC std/experimental/allocator/_mmap_allocator.d)
-                            import core.sys.windows.winnt : MEM_RELEASE;
-                            ptr.VirtualFree(0, MEM_RELEASE);
-                        }
-                        else static if (ptrAlignBytes > 0)
-                        {
-                            ptr._aligned_free;
-                        }
-                        else
-                        {
-                            ptr.free;
-                        }
+                        //Source: $(PHOBOSSRC std/experimental/allocator/mallocator.d)
+                        ptr._aligned_free;
                     }
                     else
                     {
                         ptr.free;
                     }
                 }
+                else
+                {
+                    ptr.free;
+                }
             }
         }
 
-        @system void erase(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
+        /*@system void erase(T, const Bit check = false)(CmpsPtr!T ptr) @nogc nothrow
         {
             ptr.ptr.erase!(T, check);
-        }
+        }*/
 
         @trusted T* allocNew(T, Args...)(auto ref Args args)
         {
@@ -1378,7 +1374,7 @@ else
     }
 }
 
-struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implicitCast = true, C = void)
+struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implicitCast = COMPRESS_POINTERS > 0, C = void)
 {
     private:
     alias O = typeof(array[0]);
