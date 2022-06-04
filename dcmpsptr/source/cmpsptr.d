@@ -891,6 +891,13 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(ptr);
         }
 
+        @Dispatch ref T obj() const @nogc nothrow
+        {
+            auto ptr = this.ptr;
+            assert(ptr, "References cannot be null.");
+            return *ptr;
+        }
+
         static if (opt)
         {
             @Dispatch ref T obj()
@@ -1051,13 +1058,6 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             {
                 return *this.ptr;
             }
-        }
-
-        @Dispatch ref T obj() const @nogc nothrow
-        {
-            auto ptr = this.ptr;
-            assert(ptr, "References cannot be null.");
-            return *ptr;
         }
 
         ref auto constObj() const //@nogc nothrow
@@ -1633,8 +1633,7 @@ enum Dispatch;
 
 mixin template ForwardDispatch(frwAttr = Dispatch)
 {
-    auto opDispatch(string called, Args...)(auto ref Args args)
-    {
+    enum dipsatchMethod = q{
         import std.algorithm.comparison : among;
         foreach (mbr; __traits(allMembers, typeof(this)))
         {
@@ -1692,13 +1691,22 @@ mixin template ForwardDispatch(frwAttr = Dispatch)
                 }
             }
         }
+    };
+
+    auto opDispatch(string called, Args...)(auto ref Args args) const
+    {
+        mixin(dipsatchMethod);
+    }
+
+    auto opDispatch(string called, Args...)(auto ref Args args)
+    {
+        mixin(dipsatchMethod);
     }
 }
 
 mixin template ForwardTo(alias mbr)
 {
-    auto opDispatch(string called, Args...)(auto ref Args args)
-    {
+    enum dispatchMethod = q{
         enum argsLen = args.length;
         static if (argsLen > 0)
         {
@@ -1716,6 +1724,16 @@ mixin template ForwardTo(alias mbr)
         {
             return mixin("mbr." ~ called);
         }
+    };
+
+    auto opDispatch(string called, Args...)(auto ref Args args) const
+    {
+        mixin(dispatchMethod);
+    }
+
+    auto opDispatch(string called, Args...)(auto ref Args args)
+    {
+        mixin(dispatchMethod);
     }
 }
 
