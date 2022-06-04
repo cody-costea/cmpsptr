@@ -97,7 +97,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     enum copyable = __traits(isCopyable, T);
     enum constructible = __traits(compiles, T());
     static assert (own != Own.cowCounted || copyable, "Only copyable types can have copy-on-write pointers.");
-    static assert (cmpsType < 1 || (!(is(typeof(this) == shared) || is(T == shared))), "Compressed pointers cannot be shared.");
+    static assert ((cmpsType < 1 && !track) || (!(is(typeof(this) == shared) || is(T == shared))), "Compressed pointers cannot be shared.");
 
     @trusted static CmpsPtr makeNew(Args...)(auto ref Args args)
     {
@@ -163,8 +163,17 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
     public
     {
-        @trusted T* ptr() const @nogc nothrow
+        @trusted auto ptr() const @nogc nothrow
         {
+            return cast(const T*)this.addr;
+        }
+
+        @trusted T* ptr()
+        {
+            static if (own == 1)
+            {
+                this.detach;
+            }
             return this.addr;
         }
     
@@ -216,14 +225,6 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                         if (this.refCount > 1)
                         {
                             this.ptr = Mgr!cmpsType.allocNew!T(*this.addr);
-                        }
-                    }
-                    static if (own == 1)
-                    {
-                        @trusted T* ptr()
-                        {
-                            this.detach;
-                            return this.addr;
                         }
                     }
                 }
@@ -313,7 +314,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             //private PNr _ptr = void;
             pragma(inline, true)
             {
-                @trusted T* addr() const @nogc nothrow
+                @system T* addr() const @nogc nothrow
                 {
                     return cast(T*)this._ptr;
                 }
@@ -384,7 +385,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     }
                 }
 
-                @trusted  T* addr() const @nogc nothrow
+                @system T* addr() const @nogc nothrow
                 {
                     const auto ptr = this._ptr;
                     if (ptr == 0U)
@@ -572,7 +573,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 return true;
             }
             
-            @trusted  T* addr() const @nogc nothrow
+            @system T* addr() const @nogc nothrow
             {
                 static if (USE_GLOBAL_MASK)
                 {
@@ -639,7 +640,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         mixin ForwardTo!obj;
         //mixin ForwardDispatch;
 
-        T* opCast() const
+        auto opCast() const
         {
             return this.ptr;
         }
@@ -662,7 +663,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
             else
             {
-                this.ptr!(T, remove) = copy.ptr;
+                this.ptr!(T, remove) = copy.addr;
             }
         }
 
@@ -739,13 +740,13 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
         @trusted void opAssign(ref return scope const CmpsPtr copy)
         {
-            this.ptr = copy.ptr;
+            this.ptr = copy.addr;
             this.copy(forward!copy);
         }
 
         @trusted this(ref return scope const CmpsPtr copy) //@nogc nothrow
         {
-            this.ptr!(T, false) = copy.ptr;
+            this.ptr!(T, false) = copy.addr;
             //this.copy(forward!copy);
             static if (own > 0)
             {
@@ -760,7 +761,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         {
             static if (cmpsType > 0)
             {
-                this.ptr!(T, remove) = copy.ptr;
+                this.ptr!(T, remove) = copy.addr;
             }
             else
             {
@@ -891,11 +892,11 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(ptr);
         }
 
-        @Dispatch ref T obj() const @nogc nothrow
+        @Dispatch ref auto obj() const @nogc nothrow
         {
             auto ptr = this.ptr;
             assert(ptr, "References cannot be null.");
-            return *ptr;
+            return *cast(const T*)ptr;
         }
 
         static if (opt)
@@ -929,7 +930,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 return ptr;
             }
 
-            T* addrOrNew(Args...)(auto ref Args args)
+            @system T* addrOrNew(Args...)(auto ref Args args)
             {
                 auto ptr = this.addr;
                 if (ptr == nil)
@@ -952,7 +953,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 return ptr;
             }
                     
-            T* addrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
+            @system T* addrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
             {
                 auto ptr = this.addr;
                 if (ptr == nil)
@@ -1072,6 +1073,15 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             return *(this.ptrOrNew(forward!args));
         }
 
+        ReturnType!F call(F, Args...)(F fn, auto ref Args args) const
+        {
+            auto ptr = this.ptr;
+            if (ptr)
+            {
+                return fn(*ptr, forward!args);
+            }
+        }
+
         ReturnType!F call(F, Args...)(F fn, auto ref Args args) //if (isCallable!F)
         {
             auto ptr = this.ptr;
@@ -1081,7 +1091,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
         }
 
-        ref T opCall() const @nogc nothrow
+        ref auto opCall() const @nogc nothrow
         {
             return this.obj;
         }
@@ -1155,6 +1165,11 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
         }
 
+        ReturnType!F opCall(F, Args...)(F fn, auto ref Args args) const
+        {
+            return this.call(fn, forward!args);
+        }
+
         ReturnType!F opCall(F, Args...)(F fn, auto ref Args args)
         {
             return this.call(fn, forward!args);
@@ -1172,12 +1187,12 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             return ptrAddr > cmpAddr ? 1 : (ptrAddr < cmpAddr ? -1 : 0);
         }
 
-        @safe Bit opEquals(const T* ptr) const @nogc nothrow
+        Bit opEquals(const T* ptr) const @nogc nothrow
         {
             return this.addr == ptr;
         }
 
-        @safe SNr opCmp(const T* ptr) const @nogc nothrow
+        SNr opCmp(const T* ptr) const @nogc nothrow
         {
             const auto addr = this.addr;
             return addr > ptr ? 1 : (addr < ptr ? -1 : 0);
@@ -1464,7 +1479,7 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
         alias P = O*;
     }
 
-    @safe static U findIdx(O* ptr) //@nogc nothrow
+    @trusted static U findIdx(O* ptr) //@nogc nothrow
     {
         import std.traits;
         static if (isArray!(typeof(array)))
@@ -1533,7 +1548,7 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
         private:
         P _ptr = void;
         
-        @safe void copy(U idx) //@nogc nothrow
+        @trusted void copy(U idx) //@nogc nothrow
         {
             this._ptr = &(array[idx]);
         }
