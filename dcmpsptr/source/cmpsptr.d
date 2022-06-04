@@ -35,7 +35,7 @@ version(D_BetterC)
 }
 else
 {
-    enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 5;
+    enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : -5;
 }
 
 //This enum should be set to a non-zero value, only if the operating system is using the higher bits from 64bit pointers, to differentiate between processes.
@@ -97,7 +97,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     enum copyable = __traits(isCopyable, T);
     enum constructible = __traits(compiles, T());
     static assert (own != Own.cowCounted || copyable, "Only copyable types can have copy-on-write pointers.");
-    static assert (cmpsType > 0 && (!(is(typeof(this) == shared) || is(T == shared))), "Compressed pointers cannot be shared.");
+    static assert (cmpsType < 1 || (!(is(typeof(this) == shared) || is(T == shared))), "Compressed pointers cannot be shared.");
 
     @trusted static CmpsPtr makeNew(Args...)(auto ref Args args)
     {
@@ -601,7 +601,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     {
                         this._ptr = 0U;
                     }
-                    else 
+                    else
                     {
                         auto ptrNr = (cast(PNr)ptr);
                         if (checkGlobalMask!SHIFT_LEN(ptrNr))
@@ -611,8 +611,14 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                         else
                         {
                             import std.format : format;
-                            assert(0, format("Pointer address %ull cannot be compressed.", ptrNr));
-                            this._ptr = 0U;
+                            version (assert)
+                            {
+                                assert(0, format("Pointer address %ull cannot be compressed.", ptrNr));
+                            }
+                            else
+                            {
+                                this._ptr = 0U;
+                            }
                         }
                     }
                 }
@@ -857,14 +863,26 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
         @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowOrNew(Args...)(auto ref Args args)
         {
-            this.addrOrNew(forward!args);
-            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this._ptr);
+            auto ptr = this._ptr;
+            //this.addrOrNew(forward!args);
+            if (!ptr)
+            {
+                this.ptr = Mgr!cmpsType.allocNew!T(forward!args);
+                ptr = this._ptr;
+            }
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(ptr);
         }
 
         @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowOrElse(F, Args...)(F fn, auto ref Args args)
         {
-            this.addrOrElse((fn, forward!args));
-            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this._ptr);
+            auto ptr = this._ptr;
+            //this.addrOrElse((fn, forward!args));
+            if (!ptr)
+            {
+                this.ptr = fn(forward!args);
+                ptr = this._ptr;
+            }
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(ptr);
         }
 
         static if (opt)
@@ -1036,6 +1054,11 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             {
                 return fn(*ptr, forward!args);
             }
+        }
+        
+        @system ref T all() const
+        {
+            return *this.addr;
         }
 
         static if (own != -1)
