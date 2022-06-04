@@ -29,13 +29,13 @@ The following negative values can also be used, but they are not safe and will l
 If a value higher or lower than those mentioned is set, on Windows and Posix systems, the allocation functions defined in this module, will attempt to
 request aligned memory from the operating system, so that the specified number of low bits is available for shifting. This is however not recommended.
 */
-version(D_BetterC)
+version (D_BetterC)
 {
     enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : -5;
 }
 else
 {
-    enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : -5;
+    enum COMPRESS_POINTERS = (void*).sizeof < 8 ? 0 : 5;
 }
 
 //This enum should be set to a non-zero value, only if the operating system is using the higher bits from 64bit pointers, to differentiate between processes.
@@ -163,7 +163,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
     public
     {
-        @Dispatch @trusted T* ptr() const @nogc nothrow
+        @trusted T* ptr() const @nogc nothrow
         {
             return this.addr;
         }
@@ -220,7 +220,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     }
                     static if (own == 1)
                     {
-                        @Dispatch @trusted T* ptr()
+                        @trusted T* ptr()
                         {
                             this.detach;
                             return this.addr;
@@ -636,7 +636,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     }
     else
     {
-        mixin ForwardTo!ptr;
+        mixin ForwardTo!obj;
         //mixin ForwardDispatch;
 
         T* opCast() const
@@ -648,7 +648,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     public pragma(inline, true):
     static if (opt)
     {
-        private @system void copy(const Bit remove = true)(ref return scope CmpsPtr!(T,
+        private @system void copy(const Bit remove = true)(ref return scope const CmpsPtr!(T,
                                     own, Opt.nonNull, track, false, cmpsType, U) copy) //@nogc nothrow
         {
             static if (own || cmpsType < 1)
@@ -668,7 +668,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
         static if (own != -1)
         {
-            @trusted void opAssign(ref return scope CmpsPtr!(T, own, Opt.nonNull, track, false, cmpsType, U) copy)
+            @trusted void opAssign(ref return scope const CmpsPtr!(T, own, Opt.nonNull, track, false, cmpsType, U) copy)
             {
                 static if (own < -1)
                 {                        
@@ -682,7 +682,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
         }
 
-        @trusted this(ref return scope CmpsPtr!(T, own, Opt.nonNull, track, false, cmpsType, U) copy) //@nogc nothrow
+        @trusted this(ref return scope const CmpsPtr!(T, own, Opt.nonNull, track, false, cmpsType, U) copy) //@nogc nothrow
         {
             this.copy!false(forward!copy);
             static if (own < - 1)
@@ -727,7 +727,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
     static if (own > 0)
     {
-        private @system void copy(ref return scope CmpsPtr copy) //@nogc nothrow
+        private @system void copy(ref return scope const CmpsPtr copy) //@nogc nothrow
         {
             //this.count = nil;
             static if (own > 0)
@@ -737,21 +737,26 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
         }
 
-        @trusted void opAssign(ref return scope CmpsPtr copy)
+        @trusted void opAssign(ref return scope const CmpsPtr copy)
         {
             this.ptr = copy.ptr;
             this.copy(forward!copy);
         }
 
-        @trusted this(ref return scope CmpsPtr copy) //@nogc nothrow
+        @trusted this(ref return scope const CmpsPtr copy) //@nogc nothrow
         {
             this.ptr!(T, false) = copy.ptr;
-            this.copy(forward!copy);
+            //this.copy(forward!copy);
+            static if (own > 0)
+            {
+                this.count = copy.count;
+                this.increase;
+            }
         }
     }
     else static if (own == 0)
     {
-        private @system void copy(const Bit remove = true)(ref return scope CmpsPtr copy) //@nogc nothrow
+        private @system void copy(const Bit remove = true)(ref return scope const CmpsPtr copy) //@nogc nothrow
         {
             static if (cmpsType > 0)
             {
@@ -763,18 +768,19 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
         }
 
-        @trusted void opAssign(ref return scope CmpsPtr copy)
+        @trusted void opAssign(ref return scope const CmpsPtr copy)
         {
             this.copy!true(forward!copy);
         }
 
-        @trusted this(ref return scope CmpsPtr copy) //@nogc nothrow
+        @trusted this(ref return scope const CmpsPtr copy) //@nogc nothrow
         {
             this.copy!false(forward!copy);
         }
     }
     else static if (own == -1)
     {
+        @disable this(ref return scope const CmpsPtr copy);
         @disable this(ref return scope CmpsPtr copy);
     }
     else static if (own < -1)
@@ -825,35 +831,35 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         }
     }
 
-    public
+    public @trusted
     {
         static if (copyable)
         {
-            @trusted CmpsPtr clone() const
+            CmpsPtr clone() const
             {
                 return CmpsPtr(Mgr!cmpsType.allocNew!T(*this.addr));
             }
         }
 
-        @trusted void opAssign(P)(P* ptr) if (is(P == T) && own != -1)
+        void opAssign(P)(P* ptr) if (is(P == T) && own != -1)
         {
             this.copy!P(ptr);
         }
 
         static if (opt > 0 && own != -1)
         {
-            @trusted void opAssign(Nil)
+            void opAssign(Nil)
             {
                 this.copy!T(nil);
             }
         }
 
-        @trusted CmpsPtr!(T, Own.borrowed, Opt.nullable, track, implicitCast, cmpsType) borrow() //const
+        CmpsPtr!(T, Own.borrowed, Opt.nullable, track, implicitCast, cmpsType) borrow() //const
         {
             return CmpsPtr!(T, Own.borrowed, Opt.nullable, track, implicitCast, cmpsType)(this._ptr);
         }
 
-        @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowNonNull() //const
+        CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowNonNull() //const
         {
             //this.obj;
             auto ptr = this._ptr;
@@ -861,7 +867,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(ptr);
         }
 
-        @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowOrNew(Args...)(auto ref Args args)
+        CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowOrNew(Args...)(auto ref Args args)
         {
             auto ptr = this._ptr;
             //this.addrOrNew(forward!args);
@@ -873,7 +879,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(ptr);
         }
 
-        @trusted CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowOrElse(F, Args...)(F fn, auto ref Args args)
+        CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowOrElse(F, Args...)(F fn, auto ref Args args)
         {
             auto ptr = this._ptr;
             //this.addrOrElse((fn, forward!args));
@@ -887,9 +893,9 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
         static if (opt)
         {
-            @trusted ref T obj()
+            @Dispatch ref T obj()
             {
-                auto ptr = this.addr;
+                auto ptr = this.ptr;
                 static if (constructible)
                 {
                     if (ptr == nil)
@@ -905,7 +911,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 return *ptr;
             }
 
-            @trusted T* ptrOrNew(Args...)(auto ref Args args)
+            T* ptrOrNew(Args...)(auto ref Args args)
             {
                 auto ptr = this.ptr;
                 if (ptr == nil)
@@ -916,7 +922,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 return ptr;
             }
 
-            @trusted T* addrOrNew(Args...)(auto ref Args args)
+            T* addrOrNew(Args...)(auto ref Args args)
             {
                 auto ptr = this.addr;
                 if (ptr == nil)
@@ -928,7 +934,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
 
             import std.traits : ReturnType;
-            @trusted T* ptrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
+            T* ptrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
             {
                 auto ptr = this.ptr;
                 if (ptr == nil)
@@ -939,7 +945,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 return ptr;
             }
                     
-            @trusted T* addrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
+            T* addrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
             {
                 auto ptr = this.addr;
                 if (ptr == nil)
@@ -950,9 +956,9 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 return ptr;
             }
 
-            @trusted ref T objOrElse(F, Args...)(F fn, auto ref Args args)
+            ref T objOrElse(F, Args...)(F fn, auto ref Args args)
             {
-                auto ptr = this.addrOrElse(fn, forward!args);
+                auto ptr = this.ptrOrElse(fn, forward!args);
                 static if (constructible)
                 {
                     if (ptr == nil)
@@ -968,12 +974,12 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 return *ptr;
             }
 
-            static if (own != -1)
+            static if (own < -1)
             {
-                @trusted T* takePtr()
+                T* swapPtr(T* newPtr)
                 {
                     auto ptr = this.addr;
-                    if (ptr)
+                    /*if (ptr)
                     {
                         static if (own > 0)
                         {
@@ -988,7 +994,6 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                                 }
                                 else
                                 {
-                                    this.clean;
                                     count.ptr!ZNr = nil;
                                     Mgr!COMPRESS_POINTERS.erase!(ZNr, false)(cntPtr);
                                 }
@@ -1003,69 +1008,94 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                         {
                             this._ptr = nil;
                         }
-                    }
+                    }*/
+                    this.ptr = newPtr;
                     return ptr;
+                }
+
+                T* takePtr()
+                {
+                    return this.swapPtr(nil);
                 }
             }
         }
         else
         {
-            @trusted ref T obj()
+            @Dispatch ref T obj()
             {
-                return *this.addr;
+                return *this.ptr;
             }
 
-            @trusted T* ptrOrNew(Args...)(auto ref Args args)
+            T* ptrOrNew(Args...)(auto ref Args args)
             {
                 return this.ptr;
             }
 
-            @trusted T* addrOrNew(Args...)(auto ref Args args)
+            T* addrOrNew(Args...)(auto ref Args args)
             {
                 return this.addr;
             }
 
             import std.traits : ReturnType;
-            @trusted T* ptrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
+            T* ptrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
             {
                 return this.ptr;
             }
                     
-            @trusted T* addrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
+            T* addrOrElse(F, Args...)(F fn, auto ref Args args) if (is(ReturnType!F == T*))
             {
                 return this.addr;
             }
 
-            @trusted ref T objOrElse(F, Args...)(F fn, auto ref Args args)
+            ref T objOrElse(F, Args...)(F fn, auto ref Args args)
             {
-                return *this.addr;
+                return *this.ptr;
             }
         }
 
-        @trusted ref T objOrNew(Args...)(auto ref Args args)
+        @Dispatch ref T obj() const @nogc nothrow
         {
-            return *(this.addrOrNew(forward!args));
+            auto ptr = this.ptr;
+            assert(ptr, "References cannot be null.");
+            return *ptr;
         }
 
-        @trusted ReturnType!F call(F, Args...)(F fn, auto ref Args args) //if (isCallable!F)
+        ref auto constObj() const //@nogc nothrow
         {
-            auto ptr = this.addr;
+            auto ptr = cast(const T*)this.addr;
+            assert(ptr, "References cannot be null.");
+            return *ptr;
+        }
+
+        ref T objOrNew(Args...)(auto ref Args args)
+        {
+            return *(this.ptrOrNew(forward!args));
+        }
+
+        ReturnType!F call(F, Args...)(F fn, auto ref Args args) //if (isCallable!F)
+        {
+            auto ptr = this.ptr;
             if (ptr)
             {
                 return fn(*ptr, forward!args);
             }
         }
-        
-        @system ref T all() const
+
+        ref T opCall() const @nogc nothrow
         {
-            return *this.addr;
+            return this.obj;
+        }
+
+        ref T opCall()
+        {
+            return this.obj;
         }
 
         static if (own != -1)
         {
             private
             {
-                @trusted void applyCopy(P)(P copy)
+                void applyCopy(P)(P copy)
                 {
                     static if (own > 0)
                     {
@@ -1078,7 +1108,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     }
                 }
 
-                @trusted CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) getNonNull()
+                CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) getNonNull()
                 {
                     auto cmpsPtr = CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType)(this._ptr);
                     this.applyCopy(cmpsPtr);
@@ -1086,25 +1116,38 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 }
             }
 
-            @trusted CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) nonNull()
+            CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) nonNull()
             {
-                this.obj;
+                static if (opt)
+                {
+                    if (this.isNil)
+                    {
+                        static if (constructible)
+                        {
+                            this.ptr = Mgr!(cmpsType).allocNew!T;
+                        }
+                        else
+                        {
+                            assert(0, "References cannot be null.");
+                        }
+                    }
+                }
                 return this.getNonNull;
             }
 
-            @trusted CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) nonNullOrNew(Args...)(auto ref Args args)
+            CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) nonNullOrNew(Args...)(auto ref Args args)
             {
                 this.addrOrNew(forward!args);
                 return this.getNonNull;
             }
 
-            @trusted CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) nonNullOrElse(F, Args...)(F fn, auto ref Args args)
+            CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) nonNullOrElse(F, Args...)(F fn, auto ref Args args)
             {
                 this.addrOrElse((fn, forward!args));
-                return this.getNonNull;
+                return this.nonNull;
             }
 
-            @trusted CmpsPtr!(T, own, Opt.nullable, track, implicitCast, cmpsType) nullable()
+            CmpsPtr!(T, own, Opt.nullable, track, implicitCast, cmpsType) nullable()
             {
                 auto cmpsPtr = CmpsPtr!(T, own, Opt.nullable, track, implicitCast, cmpsType)(this._ptr);
                 this.applyCopy(cmpsPtr);
@@ -1112,7 +1155,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
         }
 
-        @trusted ReturnType!F opCall(F, Args...)(F fn, auto ref Args args)
+        ReturnType!F opCall(F, Args...)(F fn, auto ref Args args)
         {
             return this.call(fn, forward!args);
         }
@@ -1234,7 +1277,7 @@ public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignByte
                     import core.sys.posix.stdlib : posix_memalign;
                     return (posix_memalign(&ptr, ptrAlignBytes, T.sizeof * qty)) ? nil : cast(T*)ptr;
                 }
-                else version(Windows)
+                else version (Windows)
                 {
                     return cast(T*)_aligned_malloc(ptrAlignBytes, T.sizeof * qty);
                 }
@@ -1275,7 +1318,7 @@ public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignByte
             }
             else
             {
-                version(Posix)
+                version (Posix)
                 {
                     static if (ptrAlignBytes)
                     {
@@ -1288,7 +1331,7 @@ public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignByte
                         ptr.munmap(T.sizeof * qty);
                     }
                 }
-                version(Windows)
+                version (Windows)
                 {
                     static if (ptrAlignBytes == 0)
                     {
@@ -1458,18 +1501,19 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
             this._idx = this.findIdx(cast(O*)ptr);
         }
 
-        @safe void copy(U idx) @nogc nothrow
+        @trusted void copy(U idx) @nogc nothrow
         {
+            assert(idx < array.length, "Index outside of array length.");
             this._idx = idx;
         }
         
-        @safe void copy(ref return scope IdxHndl copy) //@nogc nothrow
+        @safe void copy(ref return scope const IdxHndl copy) //@nogc nothrow
         {
             this._idx = copy._idx;
         }
 
         public:
-        @safe @Dispatch ref T obj() const @nogc nothrow
+        @trusted @Dispatch ref T obj() const @nogc nothrow
         {
             return cast(T)array[this._idx];
         }
@@ -1499,7 +1543,7 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
             this._ptr = cast(O*)ptr;
         }
         
-        @safe void copy(ref return scope IdxHndl copy) //@nogc nothrow
+        @safe void copy(ref return scope const IdxHndl copy) //@nogc nothrow
         {
             this._ptr = copy._ptr;
         }
@@ -1537,9 +1581,9 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
         this.copy(ptr);
     }
 
-    @safe void opAssign(ref return scope IdxHndl copy) //@nogc nothrow
+    @safe void opAssign(ref return scope const IdxHndl copy) //@nogc nothrow
     {
-        this.copy(ptr);
+        this.copy(copy);
     }
 
     /*@trusted void opAssign(ref T obj) @nogc nothrow
@@ -1557,9 +1601,9 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
         this.copy(ptr);
     }
 
-    @safe this(ref return scope IdxHndl copy) //@nogc nothrow
+    @safe this(ref return scope const IdxHndl copy) //@nogc nothrow
     {
-        this.copy(ptr);
+        this.copy(copy);
     }
 
     /*@system this(ref T obj) @nogc nothrow
