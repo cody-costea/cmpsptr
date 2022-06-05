@@ -92,7 +92,7 @@ alias Own = Ownership;
 alias Opt = Optionality;
 
 struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullable, const Bit track = own,
-               const Bit implicitCast = !own, const SNr cmpsType = COMPRESS_POINTERS, U = UNr)
+               const Bit implicitCast = opt > 0 && !own, const SNr cmpsType = COMPRESS_POINTERS, U = UNr)
 {
     enum copyable = __traits(isCopyable, T);
     enum constructible = __traits(compiles, T());
@@ -695,16 +695,6 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
         static if (own > -1)
         {
-            /*@trusted void opAssign(ref return scope const CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType, U) copy)
-            {
-                this.copy!true(forward!copy);
-            }
-
-            @trusted this(ref return scope const CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType, U) copy)
-            {
-                this.copy!false(forward!copy);
-            }*/
-            
             @trusted void opAssign(const CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType, U) copy)
             {
                 this.copy!true(forward!copy);
@@ -757,12 +747,6 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
         static if (opt > -1)
         {
-            /*@trusted void opAssign(ref return scope const CmpsPtr copy)
-            {
-                this.ptr = copy.addr;
-                this.copy(forward!copy);
-            }*/
-
             @trusted void opAssign(const CmpsPtr copy)
             {
                 this.ptr = copy.addr;
@@ -796,11 +780,6 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         }
         static if (opt > -1)
         {
-            /*@trusted void opAssign(ref return scope const CmpsPtr copy)
-            {
-                this.copy!true(forward!copy);
-            }*/
-
             @trusted void opAssign(const CmpsPtr copy)
             {
                 this.copy!true(forward!copy);
@@ -1835,7 +1814,7 @@ mixin template ForwardDispatch(frwAttr = Dispatch)
                         {
                             enum callStmt = "(" ~ q{mixin(mbr ~ "." ~ called)} ~ ")";
                         }
-                        static if (/*__traits(hasMember, P, called) ||*/__traits(compiles, mixin(callStmt)))
+                        static if (__traits(hasMember, P, called) || __traits(compiles, mixin(callStmt)))
                         {
                             return mixin(callStmt);
                         }
@@ -1856,27 +1835,61 @@ mixin template ForwardDispatch(frwAttr = Dispatch)
     }
 }
 
-mixin template ForwardTo(alias mbr)
+mixin template ForwardTo(Fields...)
 {
-    enum dispatchMethod = q{
-        enum argsLen = args.length;
-        static if (argsLen > 0)
-        {
-            static if (argsLen > 1)
+    static assert(Fields.length > 0, "Forwarded fields have not been specified.");
+    static if (Fields.length > 1)
+    {
+        enum dispatchMethod = q{
+            enum argsLen = args.length;
+            static if (argsLen > 0)
             {
-                import core.lifetime : forward;
-                return mixin("mbr." ~ called ~ "(forward!args)");
+                static if (argsLen > 1)
+                {
+                    import core.lifetime : forward;
+                    enum callStmt = "(" ~ q{mixin("mbr." ~ called ~ "(forward!args)")} ~ ")";
+                }
+                else
+                {
+                    enum callStmt = "(" ~ q{mixin("mbr." ~ called ~ " = args[0]")} ~ ")";
+                }
             }
             else
             {
-                return mixin("mbr." ~ called ~ " = args[0]");
+                enum callStmt = "(" ~ q{mixin("mbr." ~ called)} ~ ")";
             }
-        }
-        else
-        {
-            return mixin("mbr." ~ called);
-        }
-    };
+            static foreach(mbr; Fields)
+            {
+                static if (__traits(compiles, mixin(callStmt)))
+                {
+                    return mixin(callStmt);
+                }
+            }
+        };
+    }
+    else
+    {
+        enum dispatchMethod = q{
+            alias mbr = Fields[0];
+            enum argsLen = args.length;
+            static if (argsLen > 0)
+            {
+                static if (argsLen > 1)
+                {
+                    import core.lifetime : forward;
+                    return mixin("mbr." ~ called ~ "(forward!args)");
+                }
+                else
+                {
+                    return mixin("mbr." ~ called ~ " = args[0]");
+                }
+            }
+            else
+            {
+                return mixin("mbr." ~ called);
+            }
+        };
+    }
 
     auto opDispatch(string called, Args...)(auto ref Args args) const
     {
