@@ -1170,19 +1170,32 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         
         @system 
         {
-            ref T mutObj() //@nogc nothrow
+            private auto self() const
             {
-                return this.obj;
+                return (cast(CmpsPtr*)(&this));
             }
             
-            static if (own != 1)
+            ref T mutObj() const //@nogc nothrow
             {
-                ref T mutObj() const //@nogc nothrow
+                static if (own == 1)
+                {
+                    self.detach;
+                }
+                static if (opt)
                 {
                     auto ptr = this.addr;
                     assert(ptr, "References cannot be null.");
                     return *ptr;
                 }
+                else
+                {
+                    return *this.addr;
+                }
+            }
+
+            ref T mutObj() //@nogc nothrow
+            {
+                return this.obj;
             }
         }
 
