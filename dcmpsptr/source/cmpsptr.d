@@ -91,8 +91,8 @@ enum Optionality : SNr
 alias Own = Ownership;
 alias Opt = Optionality;
 
-struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullable, const Bit track = true,
-               const Bit implicitCast = true, const SNr cmpsType = COMPRESS_POINTERS, U = UNr)
+struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullable, const Bit track = own,
+               const Bit implicitCast = !own, const SNr cmpsType = COMPRESS_POINTERS, U = UNr)
 {
     enum copyable = __traits(isCopyable, T);
     enum constructible = __traits(compiles, T());
@@ -892,6 +892,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 return CmpsPtr(Mgr!cmpsType.allocNew!T(*this.addr));
             }
         }
+
         void opAssign(P)(P* ptr) if (is(P == T) && own != -1)
         {
             this.copy!P(ptr);
@@ -905,48 +906,31 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
         }
 
-        CmpsPtr!(T, Own.borrowed, Opt.nullable, track, implicitCast, cmpsType) borrow() //const
+        CmpsPtr!(T, Own.borrowed, Opt.nullable, track, implicitCast, cmpsType) borrow() const
         {
             return CmpsPtr!(T, Own.borrowed, Opt.nullable, track, implicitCast, cmpsType)(this._ptr);
         }
 
-        CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowNonNull() //const
+        CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowNonNull() const
+        {
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this.nonNullPtr);
+        }
+
+        CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowNonNull()
         {
             //this.obj;
-            auto ptr = this._ptr;
-            assert(ptr, "Non-nullable pointers cannot be null.");
-            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(ptr);
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this.nonNullPtr);
         }
 
         CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowOrNew(Args...)(auto ref Args args)
         {
-            auto ptr = this._ptr;
-            //this.addrOrNew(forward!args);
-            if (!ptr)
-            {
-                this.ptr = Mgr!cmpsType.allocNew!T(forward!args);
-                ptr = this._ptr;
-            }
-            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(ptr);
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this.nonNullPtrOrNew(forward!args));
         }
 
         CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowOrElse(F, Args...)(F fn, auto ref Args args)
         {
-            auto ptr = this._ptr;
-            //this.addrOrElse((fn, forward!args));
-            if (!ptr)
-            {
-                this.ptr = fn(forward!args);
-                ptr = this._ptr;
-            }
-            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(ptr);
-        }
-
-        @Dispatch ref auto obj() const @nogc nothrow
-        {
-            auto ptr = this.ptr;
-            assert(ptr, "References cannot be null.");
-            return *cast(const T*)ptr;
+            
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this.nonNullPtrOrElse(fn, forward!args));
         }
 
         static if (opt)
@@ -958,7 +942,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 {
                     if (ptr == nil)
                     {
-                        ptr = Mgr!(cmpsType).allocNew!T;
+                        ptr = Mgr!cmpsType.allocNew!T;
                         this.ptr = ptr;
                     }
                 }
@@ -1032,42 +1016,83 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 return *ptr;
             }
 
-            static if (own < -1)
+            private
+            {
+                auto nonNullPtr() const
+                {
+                    auto ptr = this._ptr;
+                    assert(ptr, "Non-nullable pointers cannot be null.");
+                    return ptr;
+                }
+
+                auto nonNullPtr()
+                {
+                    auto ptr = this._ptr;
+                    static if (constructible)
+                    {
+                        if (ptr)
+                        {
+                            static if (own == 1)
+                            {
+                                this.detach;
+                            }
+                        }
+                        else
+                        {
+                            this.ptr = Mgr!cmpsType.allocNew!T;
+                            return this._ptr;
+                        }
+                    }
+                    else
+                    {
+                        assert(ptr, "Non-nullable pointers cannot be null.");
+                    }
+                    return ptr;
+                }
+
+                auto nonNullPtrOrNew(Args...)(auto ref Args args)
+                {
+                    auto ptr = this._ptr;
+                    if (ptr)
+                    {
+                        static if (own == 1)
+                        {
+                            this.detach;
+                        }
+                        return ptr;
+                    }
+                    else
+                    {
+                        this.ptr = Mgr!cmpsType.allocNew!T(forward!args);
+                        return this._ptr;
+                    }
+                }
+
+                auto nonNullPtrOrElse(F, Args...)(F fn, auto ref Args args)
+                {
+                    auto ptr = this._ptr;
+                    if (ptr)
+                    {
+                        static if (own == 1)
+                        {
+                            this.detach;
+                        }
+                        return ptr;
+                    }
+                    else
+                    {
+                        this.ptr = fn(forward!args);
+                        return this.nonNullPtr;
+                    }
+                }
+            }
+
+            static if (own < 1) @system
             {
                 T* swapPtr(T* newPtr)
                 {
                     auto ptr = this.addr;
-                    /*if (ptr)
-                    {
-                        static if (own > 0)
-                        {
-                            auto count = &this.count;
-                            auto cntPtr = count.ptr;
-                            if (cntPtr)
-                            {
-                                const auto cntNr = *cntPtr;
-                                if (cntNr > 1)
-                                {
-                                    (*cntPtr) = cntNr - 1;
-                                }
-                                else
-                                {
-                                    count.ptr!ZNr = nil;
-                                    Mgr!COMPRESS_POINTERS.erase!(ZNr, false)(cntPtr);
-                                }
-                                count = nil;
-                            }
-                        }
-                        static if (cmpsType)
-                        {
-                            this._ptr = 0U;
-                        }
-                        else
-                        {
-                            this._ptr = nil;
-                        }
-                    }*/
-                    this.ptr = newPtr;
+                    this.ptr!(T, false) = newPtr;
                     return ptr;
                 }
 
@@ -1108,6 +1133,56 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             ref T objOrElse(F, Args...)(F fn, auto ref Args args)
             {
                 return *this.ptr;
+            }
+
+            private
+            {
+                auto nonNullPtr() const
+                {
+                    return this._ptr;
+                }
+
+                auto nonNullPtrOrNew(Args...)(auto ref Args args)
+                {
+                    return this._ptr;
+                }
+
+                auto nonNullPtrOrElse(F, Args...)(F fn, auto ref Args args)
+                {
+                    return this._ptr;
+                }
+            }
+        }
+
+        @Dispatch ref auto obj() const @nogc nothrow
+        {
+            static if (opt)
+            {
+                auto ptr = this.ptr;
+                assert(ptr, "References cannot be null.");
+                return *cast(const T*)ptr;
+            }
+            else
+            {
+                return *cast(const T*)this.ptr;
+            }
+        }
+        
+        @system 
+        {
+            ref T mutObj() //@nogc nothrow
+            {
+                return this.obj;
+            }
+            
+            static if (own != 1)
+            {
+                ref T mutObj() const //@nogc nothrow
+                {
+                    auto ptr = this.addr;
+                    assert(ptr, "References cannot be null.");
+                    return *ptr;
+                }
             }
         }
 
