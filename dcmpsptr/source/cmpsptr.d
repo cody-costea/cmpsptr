@@ -222,7 +222,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 {
                     @trusted void detach()
                     {
-                        if (this.refCount > 1)
+                        if (this.refCount > 0)
                         {
                             this.ptr = Mgr!cmpsType.allocNew!T(*this.addr);
                         }
@@ -234,7 +234,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             {
                 @system void reset() //@nogc nothrow
                 {
-                    ZNr* countPtr = Mgr!cmpsType.allocNew!ZNr(1);
+                    ZNr* countPtr = Mgr!cmpsType.allocNew!ZNr(0);
                     this.count.ptr = countPtr;
                 }
                 
@@ -256,7 +256,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             if (cntPtr)
             {
                 const auto cntNr = *cntPtr;
-                if (cntNr == 1)
+                if (cntNr == 0)
                 {
                     this.clean;
                     count.ptr!ZNr = nil;
@@ -637,8 +637,11 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     }
     else
     {
-        mixin ForwardTo!obj;
-        //mixin ForwardDispatch;
+        static if (opt < 1)
+        {
+            mixin ForwardTo!obj;
+            //mixin ForwardDispatch;
+        }
 
         auto opCast() const
         {
@@ -885,28 +888,28 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
         }
 
-        CmpsPtr!(T, Own.borrowed, Opt.nullable, track, implicitCast, cmpsType) borrow() const
+        auto borrow(const Bit track = track, const Bit implicitCast = implicitCast)() const
         {
             return CmpsPtr!(T, Own.borrowed, Opt.nullable, track, implicitCast, cmpsType)(this._ptr);
         }
 
-        CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowNonNull() const
+        auto borrowNonNull(const Bit track = track, const Bit implicitCast = implicitCast)() const
         {
             return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this.nonNullPtr);
         }
 
-        CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowNonNull()
+        auto borrowNonNull(const Bit track = track, const Bit implicitCast = implicitCast)()
         {
             //this.obj;
             return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this.nonNullPtr);
         }
 
-        CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowOrNew(Args...)(auto ref Args args)
+        auto borrowOrNew(const Bit track = track, const Bit implicitCast = implicitCast, Args...)(auto ref Args args)
         {
             return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this.nonNullPtrOrNew(forward!args));
         }
 
-        CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType) borrowOrElse(F, Args...)(F fn, auto ref Args args)
+        auto borrowOrElse(const Bit track = track, const Bit implicitCast = implicitCast, F, Args...)(F fn, auto ref Args args)
         {
             
             return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this.nonNullPtrOrElse(fn, forward!args));
@@ -1235,7 +1238,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     }
                 }
 
-                CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) getNonNull()
+                auto getNonNull(const Bit track = track, const Bit implicitCast = implicitCast)()
                 {
                     auto cmpsPtr = CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType)(this._ptr);
                     this.applyCopy(cmpsPtr);
@@ -1243,7 +1246,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 }
             }
 
-            CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) nonNull()
+            auto nonNull(const Bit track = track, const Bit implicitCast = implicitCast)()
             {
                 static if (opt)
                 {
@@ -1259,22 +1262,22 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                         }
                     }
                 }
-                return this.getNonNull;
+                return this.getNonNull!(track, implicitCast);
             }
 
-            CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) nonNullOrNew(Args...)(auto ref Args args)
+            auto nonNullOrNew(const Bit track = track, const Bit implicitCast = implicitCast, Args...)(auto ref Args args)
             {
                 this.addrOrNew(forward!args);
-                return this.getNonNull;
+                return this.getNonNull!(track, implicitCast);
             }
 
-            CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType) nonNullOrElse(F, Args...)(F fn, auto ref Args args)
+            auto nonNullOrElse(const Bit track = track, const Bit implicitCast = implicitCast, F, Args...)(F fn, auto ref Args args)
             {
-                this.addrOrElse((fn, forward!args));
-                return this.nonNull;
+                this.addrOrElse(fn, forward!args);
+                return this.nonNull!(track, implicitCast);
             }
 
-            CmpsPtr!(T, own, Opt.nullable, track, implicitCast, cmpsType) nullable()
+            auto nullable(const Bit track = track, const Bit implicitCast = implicitCast)()
             {
                 auto cmpsPtr = CmpsPtr!(T, own, Opt.nullable, track, implicitCast, cmpsType)(this._ptr);
                 this.applyCopy(cmpsPtr);
@@ -1835,61 +1838,27 @@ mixin template ForwardDispatch(frwAttr = Dispatch)
     }
 }
 
-mixin template ForwardTo(Fields...)
+mixin template ForwardTo(alias mbr)
 {
-    static assert(Fields.length > 0, "Forwarded fields have not been specified.");
-    static if (Fields.length > 1)
-    {
-        enum dispatchMethod = q{
-            enum argsLen = args.length;
-            static if (argsLen > 0)
+    enum dispatchMethod = q{
+        enum argsLen = args.length;
+        static if (argsLen > 0)
+        {
+            static if (argsLen > 1)
             {
-                static if (argsLen > 1)
-                {
-                    import core.lifetime : forward;
-                    enum callStmt = "(" ~ q{mixin("mbr." ~ called ~ "(forward!args)")} ~ ")";
-                }
-                else
-                {
-                    enum callStmt = "(" ~ q{mixin("mbr." ~ called ~ " = args[0]")} ~ ")";
-                }
+                import core.lifetime : forward;
+                return mixin("mbr." ~ called ~ "(forward!args)");
             }
             else
             {
-                enum callStmt = "(" ~ q{mixin("mbr." ~ called)} ~ ")";
+                return mixin("mbr." ~ called ~ " = args[0]");
             }
-            static foreach(mbr; Fields)
-            {
-                static if (__traits(compiles, mixin(callStmt)))
-                {
-                    return mixin(callStmt);
-                }
-            }
-        };
-    }
-    else
-    {
-        enum dispatchMethod = q{
-            alias mbr = Fields[0];
-            enum argsLen = args.length;
-            static if (argsLen > 0)
-            {
-                static if (argsLen > 1)
-                {
-                    import core.lifetime : forward;
-                    return mixin("mbr." ~ called ~ "(forward!args)");
-                }
-                else
-                {
-                    return mixin("mbr." ~ called ~ " = args[0]");
-                }
-            }
-            else
-            {
-                return mixin("mbr." ~ called);
-            }
-        };
-    }
+        }
+        else
+        {
+            return mixin("mbr." ~ called);
+        }
+    };
 
     auto opDispatch(string called, Args...)(auto ref Args args) const
     {
@@ -1899,6 +1868,95 @@ mixin template ForwardTo(Fields...)
     auto opDispatch(string called, Args...)(auto ref Args args)
     {
         mixin(dispatchMethod);
+    }
+}
+
+mixin template SelfConstMutPointer()
+{
+    private auto self() const
+    {
+        import std.traits : Unqual;
+        return (cast(Unqual!(typeof(this))*)(&this));
+    }
+}
+
+mixin template RefCounted(const Bit copy = true)
+{
+    protected CmpsPtr!(ZNr, Own.borrowed, Opt.nullable, false) count = nil;//void;
+
+    mixin SelfConstMutPointer;
+
+    pragma(inline, true)
+    {
+        static if (copy)
+        {
+            @system void clean()
+            {
+                Mgr!COMPRESS_POINTERS.erase!(T, true)(self);
+            }
+
+            this(this)
+            {
+                self.increase;
+            }
+
+            ~this()
+            {
+                self.decrease;
+            }
+        }
+        public 
+        {
+            @trusted ZNr refCount() const @nogc nothrow
+            {
+                auto cPtr = self.count.ptr;
+                if (cPtr)
+                {
+                    return *(cPtr);
+                }
+                else
+                {
+                    return 0U;
+                }
+            }
+        }
+
+        protected
+        {
+            @system void reset() //@nogc nothrow
+            {
+                self.count.ptr = Mgr!COMPRESS_POINTERS.allocNew!ZNr(0);
+            }
+            
+            @system void increase() //@nogc nothrow 
+            {
+                auto cntPtr = self.count.ptr;
+                if (cntPtr)
+                {
+                    (*cntPtr) += 1;
+                }
+            }
+        }
+    }
+
+    @system protected void decrease() //@nogc nothrow
+    {
+        auto count = &(self.count);
+        auto cntPtr = count.ptr;
+        if (cntPtr)
+        {
+            const auto cntNr = *cntPtr;
+            if (cntNr == 0)
+            {
+                self.clean;
+                count.ptr!ZNr = nil;
+                Mgr!COMPRESS_POINTERS.erase!(ZNr, false)(cntPtr);
+            }
+            else //if (cntNr > 1)
+            {
+                (*cntPtr) = cntNr - 1;
+            }
+        }
     }
 }
 
