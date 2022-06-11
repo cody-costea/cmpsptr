@@ -200,14 +200,22 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     
     static if (own > 0)
     {
-        mixin RefCounted!(false, cmpsType);
+        import std.algorithm.searching : canFind;
+        static if ([__traits(allMembers, T)[]].canFind("resetCount", "increase", "decrease", "refCount"))
+        {
+            mixin RefCounted!(false, self.addr, cmpsType);
+        }
+        else
+        {
+            mixin RefCounted!(false, void, cmpsType);
+        }
 
         static if (copyable)
         {
             pragma(inline, true)
             public @trusted void detach()
             {
-                if (this.refCount > 0)
+                if (this.refCount > 1U)
                 {
                     this.ptr = Mgr!cmpsType.allocNew!T(*this.addr);
                 }
@@ -1828,34 +1836,42 @@ mixin template SelfConstMutPointer()
     }
 }
 
-mixin template RefCounted(const Bit copy = true, const SNr cmpsType = COMPRESS_POINTERS)
+mixin template RefCounted(const Bit construct = true, alias F = UNr, const SNr cmpsType = COMPRESS_POINTERS)
 {
-    protected CmpsPtr!(ZNr, Own.borrowed, Opt.nullable, false) count = nil;//void;
+    protected:
+    static if (is(F == void))
+    {
+        CmpsPtr!(ZNr, Own.borrowed, Opt.nullable, false) count = nil;//void;
+        enum cmpsPtr = 1;
+    }
+    else
+    {
+        static if (__traits(isIntegral, F))
+        {
+            enum cmpsPtr = 0;
+            F count = 1U;
+        }
+        else
+        {
+            enum cmpsPtr = -1;
+        }
+    }
 
     mixin SelfConstMutPointer;
 
-    pragma(inline, true)
+    static if (construct)
     {
-        static if (copy)
+        pragma(inline, true) this(this)
         {
-            @system void clean()
-            {
-                Mgr!cmpsType.erase!(T, false, false)(self);
-            }
-
-            this(this)
-            {
-                self.increase;
-            }
-
-            ~this()
-            {
-                self.decrease;
-            }
+            self.resetCount;
         }
-        public 
+    }
+
+    static if (cmpsPtr > 0)
+    {
+        pragma(inline, true)
         {
-            @trusted ZNr refCount() const @nogc nothrow
+            public @trusted auto refCount() const @nogc nothrow
             {
                 auto cPtr = self.count.ptr;
                 if (cPtr)
@@ -1867,13 +1883,10 @@ mixin template RefCounted(const Bit copy = true, const SNr cmpsType = COMPRESS_P
                     return 0U;
                 }
             }
-        }
 
-        protected
-        {
             @system void resetCount() //@nogc nothrow
             {
-                self.count.ptr = Mgr!cmpsType.allocNew!ZNr(0);
+                self.count.ptr = Mgr!cmpsType.allocNew!ZNr(1);
             }
             
             @system void increase() //@nogc nothrow 
@@ -1881,28 +1894,82 @@ mixin template RefCounted(const Bit copy = true, const SNr cmpsType = COMPRESS_P
                 auto cntPtr = self.count.ptr;
                 if (cntPtr)
                 {
-                    (*cntPtr) += 1;
+                    (*cntPtr) += 1U;
+                }
+            }
+        }
+
+        @system void decrease() //@nogc nothrow
+        {
+            auto count = &(self.count);
+            auto cntPtr = count.ptr;
+            if (cntPtr)
+            {
+                const auto cntNr = *cntPtr;
+                if (cntNr == 1U)
+                {
+                    self.clean;
+                    count.ptr!ZNr = nil;
+                    Mgr!cmpsType.erase!(ZNr, false, false)(cntPtr);
+                }
+                else
+                {
+                    (*cntPtr) = cntNr - 1U;
                 }
             }
         }
     }
-
-    @system protected void decrease() //@nogc nothrow
+    else static if (cmpsPtr < 0)
     {
-        auto count = &(self.count);
-        auto cntPtr = count.ptr;
-        if (cntPtr)
+        pragma(inline, true)
         {
-            const auto cntNr = *cntPtr;
-            if (cntNr == 0)
+            @trusted UNr count() const @nogc nothrow { return 0U; }
+
+            @trusted void count(const UNr _) const @nogc nothrow {}
+
+            public @trusted auto refCount() const @nogc nothrow
             {
-                self.clean;
-                count.ptr!ZNr = nil;
-                Mgr!cmpsType.erase!(ZNr, false, false)(cntPtr);
+                return F.refCount;
             }
-            else
+
+            @trusted void resetCount() const @nogc nothrow {}
+            
+            @trusted void increase() const @nogc nothrow 
             {
-                (*cntPtr) = cntNr - 1;
+                F.increase;
+            }
+
+            @system void decrease() const //@nogc nothrow
+            {
+                if (F.decrease)
+                {
+                    self.clean;
+                }
+            }
+        }
+    }
+    else
+    {
+        public pragma(inline, true)
+        {
+            @trusted auto refCount() const @nogc nothrow
+            {
+                return this.count;
+            }
+
+            @system void resetCount() const @nogc nothrow
+            {
+                self.count = 1U;
+            }
+            
+            @system void increase() const @nogc nothrow 
+            {
+                self.count += 1U;
+            }
+
+            @system Bit decrease() const @nogc nothrow
+            {
+                return ((--(self.count)) == 0U);
             }
         }
     }
