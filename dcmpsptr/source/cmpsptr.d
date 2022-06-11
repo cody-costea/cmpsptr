@@ -154,7 +154,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 {
                     if (ptr)
                     {
-                        this.reset;
+                        this.resetCount;
                     }
                 }
             }
@@ -200,71 +200,16 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     
     static if (own > 0)
     {
-        protected CmpsPtr!(ZNr, Own.borrowed, Opt.nullable, false) count = nil;//void;
+        mixin RefCounted!(false, cmpsType);
 
-        pragma(inline, true)
+        static if (copyable)
         {
-            public 
+            pragma(inline, true)
+            public @trusted void detach()
             {
-                @trusted ZNr refCount() const @nogc nothrow
+                if (this.refCount > 0)
                 {
-                    auto cPtr = this.count.ptr;
-                    if (cPtr)
-                    {
-                        return *(cPtr);
-                    }
-                    else
-                    {
-                        return 0U;
-                    }
-                }
-                static if (copyable)
-                {
-                    @trusted void detach()
-                    {
-                        if (this.refCount > 0)
-                        {
-                            this.ptr = Mgr!cmpsType.allocNew!T(*this.addr);
-                        }
-                    }
-                }
-            }
-
-            protected
-            {
-                @system void reset() //@nogc nothrow
-                {
-                    ZNr* countPtr = Mgr!cmpsType.allocNew!ZNr(0);
-                    this.count.ptr = countPtr;
-                }
-                
-                @system void increase() //@nogc nothrow 
-                {
-                    auto cntPtr = this.count.ptr;
-                    if (cntPtr)
-                    {
-                        (*cntPtr) += 1;
-                    }
-                }
-            }
-        }
-
-        @system protected void decrease() //@nogc nothrow
-        {
-            auto count = &this.count;
-            auto cntPtr = count.ptr;
-            if (cntPtr)
-            {
-                const auto cntNr = *cntPtr;
-                if (cntNr == 0)
-                {
-                    this.clean;
-                    count.ptr!ZNr = nil;
-                    Mgr!COMPRESS_POINTERS.erase!(ZNr, false)(cntPtr);
-                }
-                else //if (cntNr > 1)
-                {
-                    (*cntPtr) = cntNr - 1;
+                    this.ptr = Mgr!cmpsType.allocNew!T(*this.addr);
                 }
             }
         }
@@ -285,7 +230,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     if (ptr != this.addr)
                     {
                         this.decrease;
-                        this.reset;
+                        this.resetCount;
                     }
                 }
                 else static if (own < -1)
@@ -501,7 +446,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                         static if (own > 0)
                         {
                             this.decrease;
-                            this.reset;
+                            this.resetCount;
                         }
                         else static if (own < -1)
                         {
@@ -519,7 +464,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 }
                 static if (own > 0)
                 {
-                    this.reset;
+                    this.resetCount;
                 }
             }
             static if (ONLY_LIST)
@@ -1440,13 +1385,16 @@ public template MemoryManager(SNr cmpsType = COMPRESS_POINTERS, SNr ptrAlignByte
             ptr.ptr = nil;
         }*/
 
-        @system void erase(T, const Bit check = false)(T* ptr, const SNr qty = 1)
+        @system void erase(T, const Bit check = false, const Bit destruct = true)(T* ptr, const SNr qty = 1)
         {
             static if (check)
             {
                 if (ptr == nil) return;
             }
-            (*ptr).destroy;
+            static if (destruct)
+            {
+                (*ptr).destroy;
+            }
             static if (USE_GC_ALLOC)
             {
                 GC.free(ptr);
@@ -1880,7 +1828,7 @@ mixin template SelfConstMutPointer()
     }
 }
 
-mixin template RefCounted(const Bit copy = true)
+mixin template RefCounted(const Bit copy = true, const SNr cmpsType = COMPRESS_POINTERS)
 {
     protected CmpsPtr!(ZNr, Own.borrowed, Opt.nullable, false) count = nil;//void;
 
@@ -1892,7 +1840,7 @@ mixin template RefCounted(const Bit copy = true)
         {
             @system void clean()
             {
-                Mgr!COMPRESS_POINTERS.erase!(T, true)(self);
+                Mgr!cmpsType.erase!(T, false, false)(self);
             }
 
             this(this)
@@ -1923,9 +1871,9 @@ mixin template RefCounted(const Bit copy = true)
 
         protected
         {
-            @system void reset() //@nogc nothrow
+            @system void resetCount() //@nogc nothrow
             {
-                self.count.ptr = Mgr!COMPRESS_POINTERS.allocNew!ZNr(0);
+                self.count.ptr = Mgr!cmpsType.allocNew!ZNr(0);
             }
             
             @system void increase() //@nogc nothrow 
@@ -1950,9 +1898,9 @@ mixin template RefCounted(const Bit copy = true)
             {
                 self.clean;
                 count.ptr!ZNr = nil;
-                Mgr!COMPRESS_POINTERS.erase!(ZNr, false)(cntPtr);
+                Mgr!cmpsType.erase!(ZNr, false, false)(cntPtr);
             }
-            else //if (cntNr > 1)
+            else
             {
                 (*cntPtr) = cntNr - 1;
             }
