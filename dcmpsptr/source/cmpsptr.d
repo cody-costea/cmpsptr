@@ -91,12 +91,12 @@ enum Optionality : SNr
 alias Own = Ownership;
 alias Opt = Optionality;
 
-struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullable, const Bit track = own,
+struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullable, const Bit track = own != 0,
                const Bit implicitCast = opt > 0 && !own, const SNr cmpsType = COMPRESS_POINTERS, U = UNr)
 {
-    enum copyable = __traits(isCopyable, T);
-    enum constructible = __traits(compiles, T());
-    static assert (own != Own.cowCounted || copyable, "Only copyable types can have copy-on-write pointers.");
+    enum _copyable = __traits(isCopyable, T);
+    enum _constructible = __traits(compiles, T());
+    static assert (own != Own.cowCounted || _copyable, "Only copyable types can have copy-on-write pointers.");
     static assert ((cmpsType < 1 && !track) || (!(is(typeof(this) == shared) || is(T == shared))), "Compressed pointers cannot be shared.");
 
     @trusted static CmpsPtr makeNew(Args...)(auto ref Args args)
@@ -210,7 +210,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             mixin RefCounted!(false, void, cmpsType);
         }
 
-        static if (copyable)
+        static if (_copyable)
         {
             pragma(inline, true)
             public @trusted void detach()
@@ -288,8 +288,8 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     }
     else static if (cmpsType > 0)
     {
-        enum SHIFT_LEN = cmpsType - 2;
-        enum ONLY_LIST = SHIFT_LEN < 0;
+        enum _SHIFT_LEN = cmpsType - 2;
+        enum _ONLY_LIST = _SHIFT_LEN < 0;
         private U _ptr = 0U;
 
         @system private static Bit clearList(U ptr)
@@ -298,10 +298,10 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             {
                 return false;
             }
-            if (ONLY_LIST || (ptr & 1U) == 1U)
+            if (_ONLY_LIST || (ptr & 1U) == 1U)
             {
                 auto ptrList = &_ptr_list;
-                static if (!ONLY_LIST)
+                static if (!_ONLY_LIST)
                 {
                     ptr >>>= 1;
                 }
@@ -328,7 +328,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             {
                 @safe Bit compressed() const @nogc nothrow
                 {
-                    static if (ONLY_LIST)
+                    static if (_ONLY_LIST)
                     {
                         return false;
                     }
@@ -348,7 +348,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     //PNr ptrNr = void;
                     else 
                     {
-                        static if (ONLY_LIST)
+                        static if (_ONLY_LIST)
                         {
                             return cast(T*)_ptr_list[ptr - 1U];
                         }
@@ -362,11 +362,11 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                             {
                                 static if (USE_GLOBAL_MASK)
                                 {
-                                    return cast(T*)applyGlobalMask((cast(PNr)ptr) << SHIFT_LEN);
+                                    return cast(T*)applyGlobalMask((cast(PNr)ptr) << _SHIFT_LEN);
                                 }
                                 else
                                 {
-                                    return cast(T*)((cast(PNr)ptr) << SHIFT_LEN);
+                                    return cast(T*)((cast(PNr)ptr) << _SHIFT_LEN);
                                 }
                             }
                         }
@@ -381,9 +381,9 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             static if (remove)
             {
                 auto oldPtr = this._ptr;
-                if (ONLY_LIST || (oldPtr & 1U) == 1U)
+                if (_ONLY_LIST || (oldPtr & 1U) == 1U)
                 {
-                    static if (!ONLY_LIST)
+                    static if (!_ONLY_LIST)
                     {
                         oldPtr >>>= 1;
                     }
@@ -400,7 +400,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 if ((*ptrList)[i] == nil)
                 {
                     (*ptrList)[i] = ptr;
-                    static if (ONLY_LIST)
+                    static if (_ONLY_LIST)
                     {
                         this._ptr = i + 1U;
                     }
@@ -412,7 +412,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 }
             }
             ptrList.insert(ptr);
-            static if (ONLY_LIST)
+            static if (_ONLY_LIST)
             {
                 this._ptr = cast(U)(ptrLength + 1U);
             }
@@ -475,7 +475,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     this.resetCount;
                 }
             }
-            static if (ONLY_LIST)
+            static if (_ONLY_LIST)
             {
                 this.listPtr!remove(ptr);
             }
@@ -484,11 +484,11 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 const PNr ptrNr = cast(PNr)ptr;
                 static if (USE_GLOBAL_MASK)
                 {
-                    const bool ptrCheck = checkGlobalMask!SHIFT_LEN(ptrNr);
+                    const bool ptrCheck = checkGlobalMask!_SHIFT_LEN(ptrNr);
                 }
                 else
                 {
-                    const bool ptrCheck = ptrNr < (4294967296UL << SHIFT_LEN);
+                    const bool ptrCheck = ptrNr < (4294967296UL << _SHIFT_LEN);
                 }
                 if (ptrCheck)
                 {
@@ -496,7 +496,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     {
                         clearList(this._ptr);
                     }
-                    this._ptr = cast(U)(ptrNr >>> SHIFT_LEN);
+                    this._ptr = cast(U)(ptrNr >>> _SHIFT_LEN);
                 }
                 else
                 {
@@ -516,7 +516,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     {
         private U _ptr = void;
      
-        enum SHIFT_LEN = -(cmpsType + 1);
+        enum _SHIFT_LEN = -(cmpsType + 1);
 
         pragma(inline, true)
         {
@@ -537,12 +537,12 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     }
                     else
                     {
-                        return cast(T*)applyGlobalMask((cast(PNr)ptr) << SHIFT_LEN);
+                        return cast(T*)applyGlobalMask((cast(PNr)ptr) << _SHIFT_LEN);
                     }
                 }
                 else
                 {
-                    return cast(T*)((cast(PNr)this._ptr) << SHIFT_LEN);
+                    return cast(T*)((cast(PNr)this._ptr) << _SHIFT_LEN);
                 }
             }
             
@@ -558,9 +558,9 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     else
                     {
                         auto ptrNr = (cast(PNr)ptr);
-                        if (checkGlobalMask!SHIFT_LEN(ptrNr))
+                        if (checkGlobalMask!_SHIFT_LEN(ptrNr))
                         {
-                            this._ptr = cast(U)(ptrNr >>> SHIFT_LEN);
+                            this._ptr = cast(U)(ptrNr >>> _SHIFT_LEN);
                         }
                         else
                         {
@@ -578,7 +578,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 }
                 else
                 {
-                    this._ptr = cast(U)((cast(PNr)ptr) >>> SHIFT_LEN);
+                    this._ptr = cast(U)((cast(PNr)ptr) >>> _SHIFT_LEN);
                 }
             }
         }
@@ -820,7 +820,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
     public @trusted
     {
-        static if (copyable)
+        static if (_copyable)
         {
             CmpsPtr clone() const
             {
@@ -873,7 +873,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             @Dispatch ref T obj()
             {
                 auto ptr = this.ptr;
-                static if (constructible)
+                static if (_constructible)
                 {
                     if (ptr == nil)
                     {
@@ -936,7 +936,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             ref T objOrElse(F, Args...)(F fn, auto ref Args args)
             {
                 auto ptr = this.ptrOrElse(fn, forward!args);
-                static if (constructible)
+                static if (_constructible)
                 {
                     if (ptr == nil)
                     {
@@ -963,7 +963,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 auto nonNullPtr()
                 {
                     auto ptr = this._ptr;
-                    static if (constructible)
+                    static if (_constructible)
                     {
                         if (ptr)
                         {
@@ -1205,7 +1205,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 {
                     if (this.isNil)
                     {
-                        static if (constructible)
+                        static if (_constructible)
                         {
                             this.ptr = Mgr!(cmpsType).allocNew!T;
                         }
@@ -1794,36 +1794,85 @@ mixin template ForwardDispatch(frwAttr = Dispatch)
     }
 }
 
-mixin template ForwardTo(alias mbr)
+string _forwardMethods(T)(string field)
 {
-    enum dispatchMethod = q{
-        enum argsLen = args.length;
-        static if (argsLen > 0)
+    import std.algorithm : startsWith;
+    string ret = "import std.traits : Parameters; pragma(inline, true) {\n";
+    foreach (string mbr; __traits(allMembers, T))
+    {
+        static if ((!mbr.startsWith("_")) && mbr != "opAssign" && mbr != "opDispatch"
+                    && mbr != "opCast" && mbr != "opApply")
         {
-            static if (argsLen > 1)
+            ret ~= "static if (is(typeof(" ~ field ~ "." ~ mbr ~ ") == function))
+                    {
+                        auto ref " ~ mbr ~ "(Parameters!(typeof(" ~ field ~ "." ~ mbr ~ ")) args)
+                        {
+                            return " ~ field ~ "." ~ mbr ~ "(args);
+                        }
+                    }
+                    else
+                    {
+                        auto ref " ~ mbr ~ "()
+                        {
+                            return " ~ field ~ "." ~ mbr ~ ";
+                        }
+                    }\n";
+        }
+    }
+    return ret ~ "}";
+}
+
+mixin template ForwardTo(Fields...)
+{
+    static assert(Fields.length > 0, "Forwarded fields have not been specified.");
+    static if (Fields.length > 1)
+    {
+        import std.traits : isCallable;
+        import std.traits : ReturnType;
+        static foreach(mbr; Fields)
+        {
+            static if (isCallable!mbr)
             {
-                import core.lifetime : forward;
-                return mixin("mbr." ~ called ~ "(forward!args)");
+                mixin(_forwardMethods!(ReturnType!mbr)(mbr.stringof));
             }
             else
             {
-                return mixin("mbr." ~ called ~ " = args[0]");
+                mixin(_forwardMethods!(typeof(mbr))(mbr.stringof));
             }
         }
-        else
-        {
-            return mixin("mbr." ~ called);
-        }
-    };
-
-    auto opDispatch(string called, Args...)(auto ref Args args) const
-    {
-        mixin(dispatchMethod);
     }
-
-    auto opDispatch(string called, Args...)(auto ref Args args)
+    else
     {
-        mixin(dispatchMethod);
+        enum dispatchMethod = q{
+            alias mbr = Fields[0];
+            enum argsLen = args.length;
+            static if (argsLen > 0)
+            {
+                static if (argsLen > 1)
+                {
+                    import core.lifetime : forward;
+                    return mixin("mbr." ~ called ~ "(forward!args)");
+                }
+                else
+                {
+                    return mixin("mbr." ~ called ~ " = args[0]");
+                }
+            }
+            else
+            {
+                return mixin("mbr." ~ called);
+            }
+        };
+
+        auto opDispatch(string called, Args...)(auto ref Args args) const
+        {
+            mixin(dispatchMethod);
+        }
+
+        auto opDispatch(string called, Args...)(auto ref Args args)
+        {
+            mixin(dispatchMethod);
+        }
     }
 }
 

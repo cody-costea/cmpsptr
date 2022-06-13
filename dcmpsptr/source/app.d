@@ -57,7 +57,7 @@ struct RfcTest
     }
 }
 
-void testFunc(Ptr!(RfcTest, Own.sharedCounted, Opt.nullable) tst, const UNr again)
+void testFunc(Ptr!(RfcTest, Own.sharedCounted, Opt.nonNull) tst, const UNr again)
 {
     printf("before tst.count = %d\n", (tst.refCount));
     if (again < 3)
@@ -67,7 +67,7 @@ void testFunc(Ptr!(RfcTest, Own.sharedCounted, Opt.nullable) tst, const UNr agai
     printf("after tst.count = %d\n", (tst.refCount));
 }
 
-void testHndlFunc(Hnd!("APP.RfcTest.testArr", "APP") tst)
+void testHndlFunc(Hnd!(APP.RfcTest.testArr) tst)
 {
     printf("APP.RfcTest.testArr.index = %d\n", (tst.index));
     printf("APP.RfcTest.testArr.sizeof = %d\n", (tst.sizeof));
@@ -77,7 +77,7 @@ void doTests()
 {
     UnqTest* unq = Mgr!COMPRESS_POINTERS.allocNew!UnqTest(783);
     RfcTest* ptr = Mgr!COMPRESS_POINTERS.allocNew!RfcTest(137, unq);
-    Ptr!(RfcTest, Own.sharedCounted, Opt.nullable) tst = nil;
+    Ptr!(RfcTest, Own.sharedCounted, Opt.lazyInit) tst = nil;
     auto rfc = tst.ptrOrElse((RfcTest* ptr) { return ptr; }, ptr);    
     SNr nr = 1000;
     SNr no = 2000;
@@ -86,14 +86,14 @@ void doTests()
                                         }, nr, no);
     printf("tst.n = %d\n", tst.n);
     printf("before tst.count = %d\n", (tst.refCount));
-    testFunc(tst, 0);
+    testFunc(tst.nonNull, 0);
     printf("after tst.count = %d\n", (tst.refCount));
     printf("tst.x = %d\n", tst.x);
     tst.x = 873;
     printf("rfc.x = %d\n", rfc.x);
     printf("tst.sizeof = %d\n", tst.sizeof);
-    Hnd!("APP.RfcTest.testArr", "APP") testArr1 = 1;
-    Hnd!("APP.RfcTest.testArr", "APP") testArr2 = &(APP.RfcTest.testArr[2]);
+    Hnd!(APP.RfcTest.testArr) testArr1 = 1;
+    Hnd!(APP.RfcTest.testArr) testArr2 = &(APP.RfcTest.testArr[2]);
     testHndlFunc(testArr1);
     testHndlFunc(testArr2);
     SNr testArrElm = testArr1;
