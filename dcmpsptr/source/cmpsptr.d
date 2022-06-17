@@ -592,7 +592,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     {
         static if (opt < 1)
         {
-            mixin ForwardTo!obj;
+            mixin DispatchTo!obj;
             //mixin ForwardDispatch;
         }
 
@@ -1709,7 +1709,7 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
     }
     else
     {
-        mixin ForwardTo!obj;
+        mixin DispatchTo!obj;
         //mixin ForwardDispatch;
 
         ref T opCast() const
@@ -1794,29 +1794,65 @@ mixin template ForwardDispatch(frwAttr = Dispatch)
     }
 }
 
-string _forwardMethods(T)(string field)
+mixin template DispatchTo(alias mbr)
+{
+    enum dispatchMethod = q{
+        enum argsLen = args.length;
+        static if (argsLen > 0)
+        {
+            static if (argsLen > 1)
+            {
+                import core.lifetime : forward;
+                return mixin("mbr." ~ called ~ "(forward!args)");
+            }
+            else
+            {
+                return mixin("mbr." ~ called ~ " = args[0]");
+            }
+        }
+        else
+        {
+            return mixin("mbr." ~ called);
+        }
+    };
+
+    auto opDispatch(string called, Args...)(auto ref Args args) const
+    {
+        mixin(dispatchMethod);
+    }
+
+    auto opDispatch(string called, Args...)(auto ref Args args)
+    {
+        mixin(dispatchMethod);
+    }
+}
+
+string _forwardMethods(T, O)(string field) //inspired by "forwardToMember" from $(PHOBOSSRC std/experimental/allocator/common.d)
 {
     import std.algorithm : startsWith;
-    string ret = "import std.traits : Parameters; pragma(inline, true) {\n";
+    string ret = "import std.traits : Parameters; pragma(inline, true) {";
     foreach (string mbr; __traits(allMembers, T))
     {
-        static if ((!mbr.startsWith("_")) && mbr != "opAssign" && mbr != "opDispatch"
-                    && mbr != "opCast" && mbr != "opApply")
+        static if (!__traits(hasMember, O, mbr))
         {
-            ret ~= "static if (is(typeof(" ~ field ~ "." ~ mbr ~ ") == function))
-                    {
-                        auto ref " ~ mbr ~ "(Parameters!(typeof(" ~ field ~ "." ~ mbr ~ ")) args)
+            static if ((!mbr.startsWith("_")) && mbr != "opAssign" && mbr != "opDispatch"
+                        && mbr != "opCast" && mbr != "opApply")
+            {
+                ret ~= "static if (is(typeof(" ~ field ~ "." ~ mbr ~ ") == function))
                         {
-                            return " ~ field ~ "." ~ mbr ~ "(args);
+                            auto ref " ~ mbr ~ "(Parameters!(typeof(" ~ field ~ "." ~ mbr ~ ")) args)
+                            {
+                                return " ~ field ~ "." ~ mbr ~ "(args);
+                            }
                         }
-                    }
-                    else
-                    {
-                        auto ref " ~ mbr ~ "()
+                        else
                         {
-                            return " ~ field ~ "." ~ mbr ~ ";
-                        }
-                    }\n";
+                            auto ref " ~ mbr ~ "()
+                            {
+                                return " ~ field ~ "." ~ mbr ~ ";
+                            }
+                        }\n";
+            }
         }
     }
     return ret ~ "}";
@@ -1825,53 +1861,31 @@ string _forwardMethods(T)(string field)
 mixin template ForwardTo(Fields...)
 {
     static assert(Fields.length > 0, "Forwarded fields have not been specified.");
-    static if (Fields.length > 1)
+    import std.traits : isCallable;
+    import std.traits : isPointer;
+    static foreach(mbr; Fields)
     {
-        import std.traits : isCallable;
-        import std.traits : ReturnType;
-        static foreach(mbr; Fields)
+        static if (isCallable!mbr)
         {
-            static if (isCallable!mbr)
+            import std.traits : ReturnType;
+            static if (isPointer!(ReturnType!(typeof(mbr))))
             {
-                mixin(_forwardMethods!(ReturnType!mbr)(mbr.stringof));
+                import std.traits : PointerTarget;
+                mixin(_forwardMethods!(PointerTarget!(ReturnType!(typeof(mbr))), typeof(this))(mbr.stringof));
             }
             else
             {
-                mixin(_forwardMethods!(typeof(mbr))(mbr.stringof));
+                mixin(_forwardMethods!(ReturnType!(typeof(mbr)), typeof(this))(mbr.stringof));
             }
         }
-    }
-    else
-    {
-        enum dispatchMethod = q{
-            alias mbr = Fields[0];
-            enum argsLen = args.length;
-            static if (argsLen > 0)
-            {
-                static if (argsLen > 1)
-                {
-                    import core.lifetime : forward;
-                    return mixin("mbr." ~ called ~ "(forward!args)");
-                }
-                else
-                {
-                    return mixin("mbr." ~ called ~ " = args[0]");
-                }
-            }
-            else
-            {
-                return mixin("mbr." ~ called);
-            }
-        };
-
-        auto opDispatch(string called, Args...)(auto ref Args args) const
+        else static if (isPointer!(typeof(mbr)))
         {
-            mixin(dispatchMethod);
+            import std.traits : PointerTarget;
+            mixin(_forwardMethods!(PointerTarget!(typeof(mbr)), typeof(this))(mbr.stringof));
         }
-
-        auto opDispatch(string called, Args...)(auto ref Args args)
+        else
         {
-            mixin(dispatchMethod);
+            mixin(_forwardMethods!(typeof(mbr), typeof(this))(mbr.stringof));
         }
     }
 }
