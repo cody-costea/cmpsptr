@@ -1830,29 +1830,27 @@ mixin template DispatchTo(alias mbr)
 string _forwardMethods(T, O)(string field) //inspired by "forwardToMember" from $(PHOBOSSRC std/experimental/allocator/common.d)
 {
     import std.algorithm : startsWith;
+    import std.algorithm.comparison : among;
     string ret = "import std.traits : Parameters; pragma(inline, true) {";
     foreach (string mbr; __traits(allMembers, T))
     {
-        static if (!__traits(hasMember, O, mbr))
+        static if ((!mbr.startsWith("_")) && (!mbr.among("opAssign", "opDispatch", "opCast", "opApply"))
+            && __traits(getVisibility, mixin("T." ~ mbr)) != "private" && !__traits(hasMember, O, mbr))
         {
-            static if ((!mbr.startsWith("_")) && mbr != "opAssign" && mbr != "opDispatch"
-                        && mbr != "opCast" && mbr != "opApply")
-            {
-                ret ~= "static if (is(typeof(" ~ field ~ "." ~ mbr ~ ") == function))
+            ret ~= "static if (is(typeof(" ~ field ~ "." ~ mbr ~ ") == function))
+                    {
+                        auto ref " ~ mbr ~ "(Parameters!(typeof(" ~ field ~ "." ~ mbr ~ ")) args)
                         {
-                            auto ref " ~ mbr ~ "(Parameters!(typeof(" ~ field ~ "." ~ mbr ~ ")) args)
-                            {
-                                return " ~ field ~ "." ~ mbr ~ "(args);
-                            }
+                            return " ~ field ~ "." ~ mbr ~ "(args);
                         }
-                        else
+                    }
+                    else
+                    {
+                        auto ref " ~ mbr ~ "()
                         {
-                            auto ref " ~ mbr ~ "()
-                            {
-                                return " ~ field ~ "." ~ mbr ~ ";
-                            }
-                        }\n";
-            }
+                            return " ~ field ~ "." ~ mbr ~ ";
+                        }
+                    }\n";
         }
     }
     return ret ~ "}";
