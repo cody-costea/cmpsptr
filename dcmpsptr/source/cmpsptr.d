@@ -1829,12 +1829,13 @@ mixin template DispatchTo(alias mbr)
 
 string _forwardMethods(T, O)(string field) //inspired by "forwardToMember" from $(PHOBOSSRC std/experimental/allocator/common.d)
 {
+    import std.ascii : isUpper;
     import std.algorithm : startsWith;
     import std.algorithm.comparison : among;
     string ret = "import std.traits : Parameters; pragma(inline, true) {";
     foreach (string mbr; __traits(allMembers, T))
     {
-        static if ((!mbr.startsWith("_")) && (!mbr.among("opAssign", "opDispatch", "opCast", "opApply"))
+        static if ((!mbr.startsWith("_")) && !(mbr.startsWith("op") && mbr.length > 2 && mbr[2].isUpper)
             && __traits(getVisibility, mixin("T." ~ mbr)) != "private" && !__traits(hasMember, O, mbr))
         {
             ret ~= "static if (is(typeof(" ~ field ~ "." ~ mbr ~ ") == function))
