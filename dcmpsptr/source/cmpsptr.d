@@ -91,13 +91,13 @@ enum Optionality : SNr
 alias Own = Ownership;
 alias Opt = Optionality;
 
-struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullable, const Bit track = own != 0,
+struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullable, const Bit initialize = true,
                const Bit implicitCast = opt > 0 && !own, const SNr cmpsType = COMPRESS_POINTERS, U = UNr)
 {
     enum _copyable = __traits(isCopyable, T);
-    enum _constructible = __traits(compiles, T());
+    enum _constructible = initialize && __traits(compiles, T());
     static assert (own != Own.cowCounted || _copyable, "Only copyable types can have copy-on-write pointers.");
-    static assert ((cmpsType < 1 && !track) || (!(is(typeof(this) == shared) || is(T == shared))), "Compressed pointers cannot be shared.");
+    static assert (cmpsType < 1 || (!(is(typeof(this) == shared) || is(T == shared))), "Compressed pointers cannot be shared.");
 
     @trusted static CmpsPtr makeNew(Args...)(auto ref Args args)
     {
@@ -161,7 +161,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         }
     }
 
-    public
+    public pragma(inline, true)
     {
         @trusted auto ptr() const @nogc nothrow
         {
@@ -606,7 +606,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
     static if (opt)
     {
         private @system void copy(const Bit remove = true)(ref return scope const CmpsPtr!(T,
-                                    own, Opt.nonNull, track, implicitCast, cmpsType, U) copy) //@nogc nothrow
+                                    own, Opt.nonNull, initialize, implicitCast, cmpsType, U) copy) //@nogc nothrow
         {
             static if (own || cmpsType < 1)
             {
@@ -625,14 +625,14 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
         static if (own < -1)
         {
-            @trusted void opAssign(ref return scope CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType, U) copy)
+            @trusted void opAssign(ref return scope CmpsPtr!(T, own, Opt.nonNull, initialize, implicitCast, cmpsType, U) copy)
             {
                 auto oPtr = this._ptr;
                 this.copy!true(forward!copy);
                 copy._ptr = oPtr;
             }
 
-            @trusted this(ref return scope CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType, U) copy) //@nogc nothrow
+            @trusted this(ref return scope CmpsPtr!(T, own, Opt.nonNull, initialize, implicitCast, cmpsType, U) copy) //@nogc nothrow
             {
                 this.copy!false(forward!copy);
                 static if (own < - 1)
@@ -651,12 +651,12 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
 
         static if (own > -1)
         {
-            @trusted void opAssign(const CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType, U) copy)
+            @trusted void opAssign(const CmpsPtr!(T, own, Opt.nonNull, initialize, implicitCast, cmpsType, U) copy)
             {
                 this.copy!true(forward!copy);
             }
 
-            @trusted this(const CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType, U) copy)
+            @trusted this(const CmpsPtr!(T, own, Opt.nonNull, initialize, implicitCast, cmpsType, U) copy)
             {
                 this.copy!false(forward!copy);
             }
@@ -841,31 +841,31 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             }
         }
 
-        auto borrow(const Bit track = track, const Bit implicitCast = implicitCast)() const
+        auto borrow(const Bit initialize = initialize, const Bit implicitCast = implicitCast)() const
         {
-            return CmpsPtr!(T, Own.borrowed, Opt.nullable, track, implicitCast, cmpsType)(this._ptr);
+            return CmpsPtr!(T, Own.borrowed, Opt.nullable, initialize, implicitCast, cmpsType)(this._ptr);
         }
 
-        auto borrowNonNull(const Bit track = track, const Bit implicitCast = implicitCast)() const
+        auto borrowNonNull(const Bit initialize = initialize, const Bit implicitCast = implicitCast)() const
         {
-            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this.nonNullPtr);
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, initialize, implicitCast, cmpsType)(this.nonNullPtr);
         }
 
-        auto borrowNonNull(const Bit track = track, const Bit implicitCast = implicitCast)()
+        auto borrowNonNull(const Bit initialize = initialize, const Bit implicitCast = implicitCast)()
         {
             //this.obj;
-            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this.nonNullPtr);
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, initialize, implicitCast, cmpsType)(this.nonNullPtr);
         }
 
-        auto borrowOrNew(const Bit track = track, const Bit implicitCast = implicitCast, Args...)(auto ref Args args)
+        auto borrowOrNew(const Bit initialize = initialize, const Bit implicitCast = implicitCast, Args...)(auto ref Args args)
         {
-            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this.nonNullPtrOrNew(forward!args));
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, initialize, implicitCast, cmpsType)(this.nonNullPtrOrNew(forward!args));
         }
 
-        auto borrowOrElse(const Bit track = track, const Bit implicitCast = implicitCast, F, Args...)(F fn, auto ref Args args)
+        auto borrowOrElse(const Bit initialize = initialize, const Bit implicitCast = implicitCast, F, Args...)(F fn, auto ref Args args)
         {
             
-            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, track, implicitCast, cmpsType)(this.nonNullPtrOrElse(fn, forward!args));
+            return CmpsPtr!(T, Own.borrowed, Opt.nonNull, initialize, implicitCast, cmpsType)(this.nonNullPtrOrElse(fn, forward!args));
         }
 
         static if (opt)
@@ -1191,15 +1191,15 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     }
                 }
 
-                auto getNonNull(const Bit track = track, const Bit implicitCast = implicitCast)()
+                auto getNonNull(const Bit initialize = initialize, const Bit implicitCast = implicitCast)()
                 {
-                    auto cmpsPtr = CmpsPtr!(T, own, Opt.nonNull, track, implicitCast, cmpsType)(this._ptr);
+                    auto cmpsPtr = CmpsPtr!(T, own, Opt.nonNull, initialize, implicitCast, cmpsType)(this._ptr);
                     this.applyCopy(cmpsPtr);
                     return cmpsPtr;
                 }
             }
 
-            auto nonNull(const Bit track = track, const Bit implicitCast = implicitCast)()
+            auto nonNull(const Bit initialize = initialize, const Bit implicitCast = implicitCast)()
             {
                 static if (opt)
                 {
@@ -1215,24 +1215,24 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                         }
                     }
                 }
-                return this.getNonNull!(track, implicitCast);
+                return this.getNonNull!(initialize, implicitCast);
             }
 
-            auto nonNullOrNew(const Bit track = track, const Bit implicitCast = implicitCast, Args...)(auto ref Args args)
+            auto nonNullOrNew(const Bit initialize = initialize, const Bit implicitCast = implicitCast, Args...)(auto ref Args args)
             {
                 this.addrOrNew(forward!args);
-                return this.getNonNull!(track, implicitCast);
+                return this.getNonNull!(initialize, implicitCast);
             }
 
-            auto nonNullOrElse(const Bit track = track, const Bit implicitCast = implicitCast, F, Args...)(F fn, auto ref Args args)
+            auto nonNullOrElse(const Bit initialize = initialize, const Bit implicitCast = implicitCast, F, Args...)(F fn, auto ref Args args)
             {
                 this.addrOrElse(fn, forward!args);
-                return this.nonNull!(track, implicitCast);
+                return this.nonNull!(initialize, implicitCast);
             }
 
-            auto nullable(const Bit track = track, const Bit implicitCast = implicitCast)()
+            auto nullable(const Bit initialize = initialize, const Bit implicitCast = implicitCast)()
             {
-                auto cmpsPtr = CmpsPtr!(T, own, Opt.nullable, track, implicitCast, cmpsType)(this._ptr);
+                auto cmpsPtr = CmpsPtr!(T, own, Opt.nullable, initialize, implicitCast, cmpsType)(this._ptr);
                 this.applyCopy(cmpsPtr);
                 return cmpsPtr;
             }
