@@ -1513,7 +1513,7 @@ static if (USE_GLOBAL_MASK)
 
             @safe PNr applyGlobalMask(const PNr ptr) @nogc nothrow
             {
-                return ptr | ((cast(PNr)_global_mask) << 32);
+                return ptr | ((cast(PNr)_global_mask) << 32UL);
             }
         }
     }

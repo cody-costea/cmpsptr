@@ -46,6 +46,8 @@ thus allowing compression of larger adresses, but will reduce usable memory, as 
     #define COMPRESS_POINTERS 0
 #endif
 
+#define USE_GLOBAL_MASK 1
+
 namespace cmpsptr
 {
 
@@ -67,6 +69,64 @@ namespace cmpsptr
 
 #define CONVERT_DELEGATE_PTR(Type, Attribute, Field) \
     CONVERT_DELEGATE(Type, Attribute, *Field)
+
+#if USE_GLOBAL_MASK
+    #if USE_GLOBAL_MASK > 0
+    uintptr_t _GLOBAL_MASK = -1L;
+    template <int32_t shiftBits> inline bool checkGlobalMask(const uintptr_t ptr) noexcept
+    {
+        constexpr int32_t SHIFT_BITS = 32 + shiftBits;
+        if (_GLOBAL_MASK == -1L)
+        {
+            _GLOBAL_MASK = (ptr >> SHIFT_BITS) << SHIFT_BITS;
+            return true;
+        }
+        else
+        {
+            return _GLOBAL_MASK == ((ptr >> SHIFT_BITS) << SHIFT_BITS);
+        }
+    }
+
+    inline uintptr_t applyGlobalMask(const uintptr_t ptr) noexcept
+    {
+        return ptr | _GLOBAL_MASK;
+    }
+    #else
+    uint32_t _GLOBAL_MASK = -1;
+    template <int32_t shiftBits> inline bool checkGlobalMask(const uintptr_t ptr) noexcept
+    {
+        constexpr int32_t SHIFT_BITS = 32 + shiftBits;
+        if (_GLOBAL_MASK == -1)
+        {
+            _GLOBAL_MASK = (ptr >> SHIFT_BITS) << shiftBits;
+            return true;
+        }
+        else
+        {
+            return _GLOBAL_MASK == ((ptr >> SHIFT_BITS) << shiftBits);
+        }
+    }
+
+    inline uintptr_t applyGlobalMask(const uintptr_t ptr) noexcept
+    {
+        return ptr | ((static_cast<uintptr_t>(_GLOBAL_MASK)) << 32);
+    }
+    #endif
+    inline auto globalMask() noexcept
+    {
+        return _GLOBAL_MASK;
+    }
+#else
+    inline uintptr_t applyGlobalMask(const uintptr_t ptr) noexcept
+    {
+        return ptr;
+    }
+
+    inline auto globalMask() noexcept
+    {
+        return false;
+    }
+#endif
 
     template <typename T, class P, const int opt = -1> class BasePtr
     {
@@ -583,7 +643,7 @@ namespace cmpsptr
             }
             else
             {
-                return reinterpret_cast<T*>(static_cast<uintptr_t>(this->_ptr) << SHIFT_LEN);
+                return reinterpret_cast<T*>(applyGlobalMask(static_cast<uintptr_t>(this->_ptr) << SHIFT_LEN));
             }
         }
 
@@ -615,7 +675,11 @@ namespace cmpsptr
             {
                 uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
                 //if (addr < 1073741824UL * (2 << SHIFT_LEN))
+#if USE_GLOBAL_MASK
+                if (checkGlobalMask<SHIFT_LEN>(addr))
+#else
                 if ((4294967295UL << SHIFT_LEN) > addr)
+#endif
                 //if (addr < (10000UL))
                 {
                     //if constexpr(own)
@@ -709,7 +773,19 @@ namespace cmpsptr
     protected:
         inline T* addr() const
         {
+#if USE_GLOBAL_MASK
+            auto ptr = this->_ptr;
+            if (ptr == 0U)
+            {
+                return nullptr;
+            }
+            else
+            {
+                return reinterpret_cast<T*>(applyGlobalMask(static_cast<uintptr_t>(this->_ptr) << SHIFT_LEN));
+            }
+#else
             return reinterpret_cast<T*>(static_cast<uintptr_t>(this->_ptr) << SHIFT_LEN);
+#endif
         }
 
         inline void setAddr(std::nullptr_t)
@@ -719,9 +795,29 @@ namespace cmpsptr
 
         inline void setAddr(T* const ptr)
         {
-            //uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+
             //assert(addr < (4294967295UL << SHIFT_LEN));
+#if USE_GLOBAL_MASK
+            if (ptr == nullptr)
+            {
+                this->_ptr = 0U;
+            }
+            else
+            {
+                const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+                if (checkGlobalMask<SHIFT_LEN>(addr))
+                {
+                    this->_ptr = static_cast<uint32_t>(addr >> SHIFT_LEN);
+                }
+                else
+                {
+                    assert(0);
+                    this->_ptr = 0U;
+                }
+            }
+#else
             this->_ptr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr) >> SHIFT_LEN);
+#endif
         }
 
     public:
