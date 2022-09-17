@@ -5,6 +5,23 @@
 
 using namespace cmpsptr;
 
+#if ALIGN_POINTERS
+inline void* operator new(const std::size_t size, std::nothrow_t)
+{
+    return globalNew(size, std::nothrow);
+}
+
+void* operator new(const std::size_t size)
+{
+    return globalNew(size);
+}
+
+void operator delete(void* ptr) noexcept
+{
+    clear(ptr);
+}
+#endif
+
 class FirstTest
 {
 public:

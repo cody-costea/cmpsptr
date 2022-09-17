@@ -72,7 +72,7 @@ namespace cmpsptr
 
 #if USE_GLOBAL_MASK
     #if USE_GLOBAL_MASK > 0
-    uintptr_t _GLOBAL_MASK = -1L;
+    inline static uintptr_t _GLOBAL_MASK = -1L;
     template <int32_t shiftBits> inline bool checkGlobalMask(const uintptr_t ptr) noexcept
     {
         constexpr int32_t SHIFT_BITS = 32 + shiftBits;
@@ -498,7 +498,7 @@ namespace cmpsptr
             static_cast<P*>(this)->P::_ptr = 0U;
 #endif
             static_assert(opt != 0, "This reference is not optional and cannot be initialized from nullable pointers.");
-            static_cast<P*>(this)->P::setAddr(ptr);
+            static_cast<P*>(this)->P::setAddr(const_cast<typename std::remove_const<T>::type*>(ptr));
         }
 
         inline BasePtr<T, P, opt>()
@@ -869,7 +869,7 @@ namespace cmpsptr
         inline void setPntr(T* const ptr)
         {
             static_assert(!own, "Attempting to change unique pointer.");
-            this->setAddr(ptr);
+            this->setAddr(const_cast<typename std::remove_const<T>::type*>(ptr));
         }
 
     public:
@@ -1312,74 +1312,64 @@ namespace cmpsptr
         template <typename, class, const int> friend class BasePtr;
     };*/
 
-}
-
 #if ALIGN_POINTERS
     #ifdef Q_OS_WINDOWS
-inline void* alloc(const std::size_t size)
-{
-    return _aligned_malloc(size, ALIGN_POINTERS);
-}
-
-inline void clear(void* ptr) noexcept
-{
-    _aligned_free(ptr);
-}
-    #else
-inline void clear(void* ptr) noexcept
-{
-    free(ptr);
-}
-        #ifdef Q_OS_ANDROID
-inline void* alloc(const std::size_t size)
-{
-    void* ptr;
-    posix_memalign(&ptr, ALIGN_POINTERS, size);
-    return ptr;
-}
-        #else
-inline void* alloc(const std::size_t size)
-{
-    return std::aligned_alloc(ALIGN_POINTERS, size);
-}
-        #endif
-    #endif
-inline void* operator new(const std::size_t size, std::nothrow_t)
-{
-    return alloc(size);
-}
-
-void* operator new(const std::size_t size)
-{
-    auto ptr = alloc(size);
-    if (ptr)
+    inline void* alloc(const std::size_t size)
     {
+        return _aligned_malloc(size, ALIGN_POINTERS);
+    }
+
+    inline void clear(void* ptr) noexcept
+    {
+        _aligned_free(ptr);
+    }
+    #else
+    inline void clear(void* ptr) noexcept
+    {
+        free(ptr);
+    }
+        #ifdef Q_OS_ANDROID
+    inline void* alloc(const std::size_t size)
+    {
+        void* ptr;
+        posix_memalign(&ptr, ALIGN_POINTERS, size);
         return ptr;
     }
-    else
+        #else
+    inline void* alloc(const std::size_t size)
     {
-        throw std::bad_alloc {};
+        return std::aligned_alloc(ALIGN_POINTERS, size);
     }
-}
+        #endif
+    #endif
+    inline void* globalNew(const std::size_t size, std::nothrow_t)
+    {
+        return alloc(size);
+    }
 
-void operator delete(void* ptr) noexcept
-{
-    clear(ptr);
-}
+    inline void* globalNew(const std::size_t size)
+    {
+        auto ptr = alloc(size);
+        if (ptr)
+        {
+            return ptr;
+        }
+        else
+        {
+            throw std::bad_alloc {};
+        }
+    }
 #else
-inline void* alloc(const std::size_t size)
-{
-    return std::malloc(size);
-}
+    inline void* alloc(const std::size_t size)
+    {
+        return std::malloc(size);
+    }
 
-inline void clear(void* ptr) noexcept
-{
-    free(ptr);
-}
+    inline void clear(void* ptr) noexcept
+    {
+        free(ptr);
+    }
 #endif
-
-namespace cmpsptr
-{
 
     template <typename P>
     struct FixData
