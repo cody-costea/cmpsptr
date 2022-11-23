@@ -8,6 +8,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 pub mod cmpsptr {
     use std::marker::PhantomData;
     use std::ops::{Deref, DerefMut};
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 
     static mut _GLOBAL_NEW_MASK: usize = usize::MAX;
@@ -288,6 +289,77 @@ pub mod cmpsptr {
                 *((self._rfc.ptr() as *const u32) as *mut u32) += 1;
             }
             CmpsCnt::<'a, T, CMPS_LEVEL> {
+                _ptr: self._ptr,
+                _rfc: self._rfc
+            }
+        }
+    }
+
+    pub struct CmpsShr<'a, T: 'a, const CMPS_LEVEL: i32> {
+        _ptr: CmpsPtr<'a, T, CMPS_LEVEL, true>,
+        _rfc: CmpsPtr<'a, AtomicU32, 3, true>
+    }
+
+    impl<'a, T, const CMPS_LEVEL: i32> CmpsShr<'a, T, CMPS_LEVEL> {
+
+        pub fn new() -> CmpsShr<'a, T, CMPS_LEVEL> {
+            let rfc = CmpsPtr::<'a, AtomicU32, 3, true>::new_alloc();
+            (rfc.ptr_mut()).store(1, Ordering::SeqCst);
+            CmpsShr::<'a, T, CMPS_LEVEL> {
+                _ptr: CmpsPtr::<'a, T, CMPS_LEVEL, true>::new_alloc(),
+                _rfc: rfc
+            }
+        }
+
+        #[inline(always)]
+        pub fn ptr_mut(&self) -> &mut T {
+            self._ptr.ptr_mut()
+        }
+
+        #[inline(always)]
+        pub fn ptr(&self) -> &T {
+            self._ptr.ptr()
+        }
+
+    }
+
+    impl<T, const CMPS_LEVEL: i32> Deref for CmpsShr<'_, T, CMPS_LEVEL> {
+        type Target = T;
+        #[inline(always)]
+        fn deref(&self) -> &Self::Target {
+            self.ptr()
+        }
+    }
+
+    impl<T, const CMPS_LEVEL: i32> DerefMut for CmpsShr<'_, T, CMPS_LEVEL> {
+        #[inline(always)]
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            self.ptr_mut()
+        }
+    }
+
+    impl<T, const CMPS_LEVEL: i32> Drop for CmpsShr<'_, T, CMPS_LEVEL> {
+        #[inline(always)]
+        fn drop(&mut self) {
+            let cnt = (*self._rfc).fetch_min(1, Ordering::SeqCst);
+            if cnt == 0 {
+                let obj_layout = Layout::new::<T>();
+                let cnt_layout = Layout::new::<AtomicU32>();
+                unsafe {
+                    dealloc((self.ptr_mut() as *mut T) as *mut u8, obj_layout);
+                    dealloc((self._rfc.ptr_mut() as *mut AtomicU32) as *mut u8, cnt_layout);
+                }
+            }
+        }
+    }
+
+    impl<'a, T, const CMPS_LEVEL: i32> Clone for CmpsShr<'a, T, CMPS_LEVEL> {
+        #[inline(always)]
+        fn clone(&self) -> CmpsShr<'a, T, CMPS_LEVEL> {
+            unsafe {
+                (*((self._rfc.ptr() as *const AtomicU32) as *mut AtomicU32)).fetch_add(1, Ordering::SeqCst);
+            }
+            CmpsShr::<'a, T, CMPS_LEVEL> {
                 _ptr: self._ptr,
                 _rfc: self._rfc
             }
