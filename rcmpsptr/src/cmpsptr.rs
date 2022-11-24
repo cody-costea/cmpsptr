@@ -17,7 +17,7 @@ pub mod cmpsptr {
 
     #[inline(always)]
     fn check_global_mask<const CMPS_LEVEL: i32, const NEW_ALLOC: bool>(ptr: usize) -> bool {
-        let shift_bits = 32 + CMPS_LEVEL;
+        let shift_bits = 32 + CMPS_LEVEL.abs();
         unsafe {
             if NEW_ALLOC {
                 if _GLOBAL_NEW_MASK == usize::MAX {
@@ -108,7 +108,7 @@ pub mod cmpsptr {
         #[inline(always)]
         pub fn ptr(&self) -> &T {
             unsafe {
-                let p = apply_global_mask::<NEW_ALLOC>((self._ptr as usize) << CMPS_LEVEL);
+                let p = apply_global_mask::<NEW_ALLOC>((self._ptr as usize) << CMPS_LEVEL.abs());
                 //println!("get p = {:#b}", p);
                 &*(p as *const T)
             }
@@ -117,7 +117,7 @@ pub mod cmpsptr {
         #[inline(always)]
         pub fn ptr_mut(&self) -> &mut T {
             unsafe {
-                let p = apply_global_mask::<NEW_ALLOC>((self._ptr  as usize) << CMPS_LEVEL);
+                let p = apply_global_mask::<NEW_ALLOC>((self._ptr  as usize) << CMPS_LEVEL.abs());
                 //println!("get mut p = {:#b}", p);
                 &mut *(p as *mut T)
             }
@@ -127,7 +127,7 @@ pub mod cmpsptr {
         fn compress(ptr: &mut T) -> u32 {
             let p = (ptr as *mut T) as usize;
             if check_global_mask::<CMPS_LEVEL, NEW_ALLOC>(p) {
-                (p >> CMPS_LEVEL) as u32
+                (p >> CMPS_LEVEL.abs()) as u32
             } else {
                 panic!("CANNOT COMPRESS POINTER {}!", p)
             }
@@ -187,7 +187,7 @@ pub mod cmpsptr {
         }
     }
 
-    impl<T, const CMPS_LEVEL: i32, const NEW_ALLOC: bool> DerefMut for CmpsPtr<'_, T, CMPS_LEVEL, NEW_ALLOC> {#[inline(always)]
+    impl<T, const CMPS_LEVEL: i32, const NEW_ALLOC: bool> DerefMut for CmpsPtr<'_, T, CMPS_LEVEL, NEW_ALLOC> {
         #[inline(always)]    
         fn deref_mut(&mut self) -> &mut Self::Target {
             self.ptr_mut()
@@ -272,17 +272,98 @@ pub mod cmpsptr {
         }
     }
 
-    pub struct CmpsCnt<'a, T: 'a, C: 'a, const COW: bool, const CMPS_LEVEL: i32> where C: Counter {
+    pub struct CmpsCnt<'a, T: 'a, const COW: bool, const CMPS_LEVEL: i32> where T: Counter {
+        _ptr: CmpsPtr<'a, T, CMPS_LEVEL, true>
+    }
+
+    impl<'a, T, const COW: bool, const CMPS_LEVEL: i32> CmpsCnt<'a, T, COW, CMPS_LEVEL> where T: Counter {
+
+        pub fn new() -> CmpsCnt<'a, T, COW, CMPS_LEVEL> {
+            let mut rfc = CmpsPtr::<'a, T, CMPS_LEVEL, true>::new_alloc();
+            rfc.reset_count();
+            CmpsCnt::<'a, T, COW, CMPS_LEVEL> {
+                _ptr: rfc
+            }
+        }
+
+        pub fn detach(&mut self) {
+            if self.current_count() > 1 {
+                let mut ptr = CmpsPtr::<'a, T, CMPS_LEVEL, true>::new_alloc();
+                let layout = Layout::new::<T>();
+                unsafe {
+                    copy_nonoverlapping(self._ptr.ptr_mut() as *mut T, ptr.ptr_mut() as *mut T, layout.size());
+                }
+                ptr.reset_count();
+                self.decrease_count();
+                self._ptr = ptr;
+            }
+        }
+
+        #[inline(always)]
+        pub fn ptr_mut(&mut self) -> &mut T {
+            if COW {
+                self.detach();
+            }
+            self._ptr.ptr_mut()
+        }
+
+        #[inline(always)]
+        pub fn ptr(&self) -> &T {
+            self._ptr.ptr()
+        }
+
+    }
+
+    impl<T, const COW: bool, const CMPS_LEVEL: i32> Deref for CmpsCnt<'_, T, COW, CMPS_LEVEL> where T: Counter {
+        type Target = T;
+        #[inline(always)]
+        fn deref(&self) -> &Self::Target {
+            self.ptr()
+        }
+    }
+
+    impl<T, const COW: bool, const CMPS_LEVEL: i32> DerefMut for CmpsCnt<'_, T, COW, CMPS_LEVEL> where T: Counter {
+        #[inline(always)]
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            self.ptr_mut()
+        }
+    }
+
+    impl<T, const COW: bool, const CMPS_LEVEL: i32> Drop for CmpsCnt<'_, T, COW, CMPS_LEVEL> where T: Counter {
+        #[inline(always)]
+        fn drop(&mut self) {
+            if self.decrease_count() == 0 {
+                let obj_layout = Layout::new::<T>();
+                unsafe {
+                    dealloc((self.ptr_mut() as *mut T) as *mut u8, obj_layout);
+                }
+            }
+        }
+    }
+
+    impl<'a, T, const COW: bool, const CMPS_LEVEL: i32> Clone for CmpsCnt<'a, T, COW, CMPS_LEVEL> where T: Counter {
+        #[inline(always)]
+        fn clone(&self) -> CmpsCnt<'a, T, COW, CMPS_LEVEL> {
+            unsafe {
+                (*((self as *const Self) as *mut Self)).increase_count();
+            }
+            CmpsCnt::<'a, T, COW, CMPS_LEVEL> {
+                _ptr: self._ptr
+            }
+        }
+    }
+
+    pub struct CmpsShr<'a, T: 'a, C: 'a, const COW: bool, const CMPS_LEVEL: i32> where C: Counter {
         _ptr: CmpsPtr<'a, T, CMPS_LEVEL, true>,
         _rfc: CmpsPtr<'a, C, 3, true>
     }
 
-    impl<'a, T, C, const COW: bool, const CMPS_LEVEL: i32> CmpsCnt<'a, T, C, COW, CMPS_LEVEL> where C: Counter  {
+    impl<'a, T, C, const COW: bool, const CMPS_LEVEL: i32> CmpsShr<'a, T, C, COW, CMPS_LEVEL> where C: Counter {
 
-        pub fn new() -> CmpsCnt<'a, T, C, COW, CMPS_LEVEL> {
+        pub fn new() -> CmpsShr<'a, T, C, COW, CMPS_LEVEL> {
             let mut rfc = CmpsPtr::<'a, C, 3, true>::new_alloc();
             rfc.reset_count();
-            CmpsCnt::<'a, T, C, COW, CMPS_LEVEL> {
+            CmpsShr::<'a, T, C, COW, CMPS_LEVEL> {
                 _ptr: CmpsPtr::<'a, T, CMPS_LEVEL, true>::new_alloc(),
                 _rfc: rfc
             }
@@ -318,7 +399,7 @@ pub mod cmpsptr {
 
     }
 
-    impl<T, C, const COW: bool, const CMPS_LEVEL: i32> Deref for CmpsCnt<'_, T, C, COW, CMPS_LEVEL> where C: Counter  {
+    impl<T, C, const COW: bool, const CMPS_LEVEL: i32> Deref for CmpsShr<'_, T, C, COW, CMPS_LEVEL> where C: Counter {
         type Target = T;
         #[inline(always)]
         fn deref(&self) -> &Self::Target {
@@ -326,14 +407,14 @@ pub mod cmpsptr {
         }
     }
 
-    impl<T, C, const COW: bool, const CMPS_LEVEL: i32> DerefMut for CmpsCnt<'_, T, C, COW, CMPS_LEVEL> where C: Counter  {
+    impl<T, C, const COW: bool, const CMPS_LEVEL: i32> DerefMut for CmpsShr<'_, T, C, COW, CMPS_LEVEL> where C: Counter {
         #[inline(always)]
         fn deref_mut(&mut self) -> &mut Self::Target {
             self.ptr_mut()
         }
     }
 
-    impl<T, C, const COW: bool, const CMPS_LEVEL: i32> Drop for CmpsCnt<'_, T, C, COW, CMPS_LEVEL> where C: Counter  {
+    impl<T, C, const COW: bool, const CMPS_LEVEL: i32> Drop for CmpsShr<'_, T, C, COW, CMPS_LEVEL> where C: Counter {
         #[inline(always)]
         fn drop(&mut self) {
             if self._rfc.decrease_count() == 0 {
@@ -347,13 +428,13 @@ pub mod cmpsptr {
         }
     }
 
-    impl<'a, T, C, const COW: bool, const CMPS_LEVEL: i32> Clone for CmpsCnt<'a, T, C, COW, CMPS_LEVEL> where C: Counter  {
+    impl<'a, T, C, const COW: bool, const CMPS_LEVEL: i32> Clone for CmpsShr<'a, T, C, COW, CMPS_LEVEL> where C: Counter {
         #[inline(always)]
-        fn clone(&self) -> CmpsCnt<'a, T, C, COW, CMPS_LEVEL> {
+        fn clone(&self) -> CmpsShr<'a, T, C, COW, CMPS_LEVEL> {
             unsafe {
                 (*((self as *const Self) as *mut Self))._rfc.increase_count();
             }
-            CmpsCnt::<'a, T, C, COW, CMPS_LEVEL> {
+            CmpsShr::<'a, T, C, COW, CMPS_LEVEL> {
                 _ptr: self._ptr,
                 _rfc: self._rfc
             }
