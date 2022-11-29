@@ -1,10 +1,9 @@
 mod cmpsptr;
 
-use std::mem::size_of;
-
 use cmpsptr::cmpsptr::{CmpsRef, CmpsUnq, CmpsCnt, CmpsShr, Counter};
 use std::sync::atomic::{AtomicU32};
 
+use std::mem::size_of;
 
 struct Test {
     x: i32,
@@ -12,24 +11,22 @@ struct Test {
     cnt: u32
 }
 
-
-
 impl Counter for Test {
 
-    fn increase_count(&mut self) -> u64 {
+    fn increase_count(&mut self) -> usize {
         let cnt = self.cnt + 1;
         self.cnt = cnt;
-        cnt as u64
+        cnt as usize
     }
 
-    fn decrease_count(&mut self) -> u64{
+    fn decrease_count(&mut self) -> usize {
         let cnt = self.cnt - 1;
         self.cnt = cnt;
-        cnt as u64
+        cnt as usize
     }
 
-    fn current_count(&self) -> u64 {
-        self.cnt as u64
+    fn current_count(&self) -> usize {
+        self.cnt as usize
     }
 
     fn reset_count(&mut self) {

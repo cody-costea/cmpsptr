@@ -6,41 +6,132 @@ License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 pub mod cmpsptr {
+    use std::vec::Vec;
     use std::marker::PhantomData;
+    use lazy_static::lazy_static;
     use std::ops::{Deref, DerefMut};
     use std::ptr::copy_nonoverlapping;
+    use std::sync::{Mutex, MutexGuard};
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 
+    lazy_static! {
+        static ref _PTR_LIST: Mutex<Vec<usize>> = Mutex::new(vec![]);
+    }
+
     static mut _GLOBAL_NEW_MASK: usize = usize::MAX;
     static mut _GLOBAL_MASK: usize = usize::MAX;
+    static mut _NULL_IDX: usize = 0;
 
     #[inline(always)]
-    fn check_global_mask<const CMPS_LEVEL: i32, const NEW_ALLOC: bool>(ptr: usize) -> bool {
-        let shift_bits = 32 + CMPS_LEVEL.abs();
+    fn listed(ptr: usize) -> bool {
+        (ptr & 1) == 1
+    }
+
+    #[inline(always)]
+    fn ptr_list() -> MutexGuard<'static, Vec<usize>> {
+        _PTR_LIST.lock().unwrap_or_else(|e| {
+            panic!("CANNOT UNWRAP POINTER LIST: {}", e);
+        })
+    }
+
+    fn list_ptr<const LIST_ONLY: bool>(ptr: usize) -> u32 {
         unsafe {
-            if NEW_ALLOC {
-                if _GLOBAL_NEW_MASK == usize::MAX {
-                    _GLOBAL_NEW_MASK = (ptr >> shift_bits) << shift_bits;
-                    true
-                } else {
-                    _GLOBAL_NEW_MASK == (ptr >> shift_bits) << shift_bits
+            let mut mutex_list = ptr_list();
+            let ptr_list = mutex_list.deref_mut();
+            let mut list_len = ptr_list.len();
+            for mut i in _NULL_IDX..list_len {
+                if ptr_list[i] == 0 {
+                    ptr_list[i] = ptr;
+                    i += 1; _NULL_IDX = i;
+                    if LIST_ONLY {
+                        return i as u32;
+                    }
+                    return ((i << 1) | 1) as u32;
                 }
+            }
+            list_len += 1;
+            ptr_list.push(ptr);
+            _NULL_IDX = list_len;
+            if LIST_ONLY {
+                list_len as u32
             } else {
-                if _GLOBAL_MASK == usize::MAX {
-                    _GLOBAL_MASK = (ptr >> shift_bits) << shift_bits;
-                    true
-                } else {
-                    _GLOBAL_MASK == (ptr >> shift_bits) << shift_bits
+                ((list_len << 1) | 1) as u32
+            }
+        }
+    }
+
+    fn unlist_ptr<const CMPS_LEVEL: i32>(ptr: u32) {
+        if CMPS_LEVEL == 0 {
+            ptr_list()[(ptr as usize) - 1] = 0;
+        } else if CMPS_LEVEL > 0 {
+            let p = ptr as usize;
+            if listed(p) {
+                ptr_list()[(p >> 1) - 1] = 0;
+            }
+        }
+    }
+
+    #[inline(always)]
+    const fn cmps_level<const CMPS_LEVEL: i32>() -> u32 {
+        if CMPS_LEVEL < 1 {
+            CMPS_LEVEL.abs() as u32
+        } else {
+            (CMPS_LEVEL - 1) as u32
+        }
+    }
+
+    #[inline(always)]
+    fn check_global_mask<const CMPS_LEVEL: i32, const NEW_ALLOC: bool>(ptr: usize) -> u32 {
+        if CMPS_LEVEL == 0 {
+            list_ptr::<true>(ptr)
+        } else if NEW_ALLOC {
+            global_compress_new::<CMPS_LEVEL>(ptr)
+        } else {
+            global_compress::<CMPS_LEVEL>(ptr)
+        }
+    }
+    
+    macro_rules! compress {
+        ($mask: ident, $ptr: ident) => {
+            {
+                let shift_bits = 32 + cmps_level::<CMPS_LEVEL>();
+                unsafe {
+                    if $mask == usize::MAX {
+                        $mask = ($ptr >> shift_bits) << shift_bits;
+                        ($ptr >> cmps_level::<CMPS_LEVEL>()) as u32
+                    } else {
+                        if $mask == ($ptr >> shift_bits) << shift_bits {
+                            ($ptr >> cmps_level::<CMPS_LEVEL>()) as u32
+                        } else {
+                            if CMPS_LEVEL < 0 {
+                                panic!("CANNOT COMPRESS POINTER {}!", $ptr)
+                            } else {
+                                list_ptr::<false>($ptr)
+                            }
+                        }
+                    }
                 }
             }
         }
     }
+
+    fn global_compress_new<const CMPS_LEVEL: i32>(ptr: usize) -> u32 {
+        compress!(_GLOBAL_NEW_MASK, ptr)
+    }
+
+    fn global_compress<const CMPS_LEVEL: i32>(ptr: usize) -> u32 {
+        compress!(_GLOBAL_MASK, ptr)
+    }
     
     #[inline(always)]
-    fn apply_global_mask<const NEW_ALLOC: bool>(ptr: usize) -> usize {
+    fn apply_global_mask<const NEW_ALLOC: bool, const CMPS_LEVEL: i32>(ptr: usize) -> usize {
         unsafe {
-            if NEW_ALLOC {
+            if CMPS_LEVEL == 0 {                
+                ptr_list()[ptr - 1]
+            } else if CMPS_LEVEL > 0 && listed(ptr) {
+                ptr_list()[(ptr >> 1) - 1]
+            } else if NEW_ALLOC {
                 ptr | _GLOBAL_NEW_MASK
             } else {
                 ptr | _GLOBAL_MASK
@@ -49,28 +140,28 @@ pub mod cmpsptr {
     }
 
     pub trait Counter {
-        fn increase_count(&mut self) -> u64;
-        fn decrease_count(&mut self) -> u64;
-        fn current_count(&self) -> u64;
+        fn increase_count(&mut self) -> usize;
+        fn decrease_count(&mut self) -> usize;
+        fn current_count(&self) -> usize;
         fn reset_count(&mut self);
     }
 
     impl Counter for u32 {
 
-        fn increase_count(&mut self) -> u64 {
+        fn increase_count(&mut self) -> usize {
             let cnt = *self + 1;
             *self = cnt;
-            cnt as u64
+            cnt as usize
         }
 
-        fn decrease_count(&mut self) -> u64{
+        fn decrease_count(&mut self) -> usize {
             let cnt = *self - 1;
             *self = cnt;
-            cnt as u64
+            cnt as usize
         }
 
-        fn current_count(&self) -> u64 {
-            *self as u64
+        fn current_count(&self) -> usize {
+            *self as usize
         }
 
         fn reset_count(&mut self) {
@@ -80,16 +171,16 @@ pub mod cmpsptr {
 
     impl Counter for AtomicU32 {
 
-        fn increase_count(&mut self) -> u64 {
-            (*self).fetch_add(1, Ordering::SeqCst) as u64
+        fn increase_count(&mut self) -> usize {
+            (*self).fetch_add(1, Ordering::SeqCst) as usize
         }
 
-        fn decrease_count(&mut self) -> u64 {
-            (*self).fetch_min(1, Ordering::SeqCst) as u64
+        fn decrease_count(&mut self) -> usize {
+            (*self).fetch_min(1, Ordering::SeqCst) as usize
         }
 
-        fn current_count(&self) -> u64 {
-            self.load(Ordering::SeqCst) as u64
+        fn current_count(&self) -> usize {
+            self.load(Ordering::SeqCst) as usize
         }
 
         fn reset_count(&mut self) {
@@ -104,33 +195,29 @@ pub mod cmpsptr {
     }
 
     impl<T, const CMPS_LEVEL: i32, const NEW_ALLOC: bool> CmpsPtr<'_, T, CMPS_LEVEL, NEW_ALLOC> {
-
+        #[inline(always)]
+        fn get_ptr(&self) -> usize {
+            apply_global_mask::<NEW_ALLOC, CMPS_LEVEL>((self._ptr  as usize) << cmps_level::<CMPS_LEVEL>())
+        }
+        
         #[inline(always)]
         pub fn ptr(&self) -> &T {
             unsafe {
-                let p = apply_global_mask::<NEW_ALLOC>((self._ptr as usize) << CMPS_LEVEL.abs());
-                //println!("get p = {:#b}", p);
-                &*(p as *const T)
+                &*(self.get_ptr() as *const T)
             }
         }
 
         #[inline(always)]
         pub fn ptr_mut(&self) -> &mut T {
             unsafe {
-                let p = apply_global_mask::<NEW_ALLOC>((self._ptr  as usize) << CMPS_LEVEL.abs());
-                //println!("get mut p = {:#b}", p);
-                &mut *(p as *mut T)
+                &mut *(self.get_ptr() as *mut T)
             }
         }
 
         #[inline(always)]
         fn compress(ptr: &mut T) -> u32 {
             let p = (ptr as *mut T) as usize;
-            if check_global_mask::<CMPS_LEVEL, NEW_ALLOC>(p) {
-                (p >> CMPS_LEVEL.abs()) as u32
-            } else {
-                panic!("CANNOT COMPRESS POINTER {}!", p)
-            }
+            check_global_mask::<CMPS_LEVEL, NEW_ALLOC>(p)
         }
 
         #[inline(always)]
@@ -267,6 +354,7 @@ pub mod cmpsptr {
         fn drop(&mut self) {
             let layout = Layout::new::<T>();
             unsafe {
+                unlist_ptr::<CMPS_LEVEL>(self._ptr._ptr);
                 dealloc((self.ptr_mut() as *mut T) as *mut u8, layout);
             }
         }
@@ -335,6 +423,7 @@ pub mod cmpsptr {
             if self.decrease_count() == 0 {
                 let obj_layout = Layout::new::<T>();
                 unsafe {
+                    unlist_ptr::<CMPS_LEVEL>(self._ptr._ptr);
                     dealloc((self.ptr_mut() as *mut T) as *mut u8, obj_layout);
                 }
             }
@@ -420,7 +509,8 @@ pub mod cmpsptr {
             if self._rfc.decrease_count() == 0 {
                 let obj_layout = Layout::new::<T>();
                 let cnt_layout = Layout::new::<u32>();
-                unsafe {
+                unsafe {                    
+                    unlist_ptr::<CMPS_LEVEL>(self._ptr._ptr);
                     dealloc((self.ptr_mut() as *mut T) as *mut u8, obj_layout);
                     dealloc((self._rfc.ptr_mut() as *mut C) as *mut u8, cnt_layout);
                 }
