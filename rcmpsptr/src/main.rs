@@ -49,7 +49,7 @@ fn main() {
         let mut t = Test { x: 5, y: 9, cnt: 1 };
         let mut z = Test { x: -3, y: -5, cnt: 1 };
         let mut u = CmpsUnq::<'_, Test, 3>::new();
-        let mut c = CmpsCow::<CmpsCnt::<'_, Test, 3>>::new();
+        let mut c = CmpsCow::<CmpsCnt::<'_, Test, 3>, true>::new();
         let mut s = CmpsShr::<'_, Test, AtomicU32, 3>::new();
         let mut p = CmpsRef::<'_, Test, 3>::new(&mut t);
         println!("sizeof p = {}", size_of::<CmpsRef::<Test, 3>>());

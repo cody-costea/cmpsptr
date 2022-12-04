@@ -6,14 +6,15 @@ License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 pub mod cmpsptr {
+
     use std::vec::Vec;
     use std::marker::PhantomData;
     use lazy_static::lazy_static;
     use std::ops::{Deref, DerefMut};
     use std::ptr::copy_nonoverlapping;
     use std::sync::{Mutex, MutexGuard};
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
+    use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
     lazy_static! {
         static ref _PTR_LIST: Mutex<Vec<usize>> = Mutex::new(vec![]);
@@ -169,6 +170,52 @@ pub mod cmpsptr {
         }
     }
 
+    impl Counter for u64 {
+
+        fn increase_count(&mut self) -> usize {
+            let cnt = *self + 1;
+            *self = cnt;
+            cnt as usize
+        }
+
+        fn decrease_count(&mut self) -> usize {
+            let cnt = *self - 1;
+            *self = cnt;
+            cnt as usize
+        }
+
+        fn current_count(&self) -> usize {
+            *self as usize
+        }
+
+        unsafe fn reset_count(&mut self) {
+            (*self) = 1;
+        }
+    }
+
+    impl Counter for usize {
+
+        fn increase_count(&mut self) -> usize {
+            let cnt = *self + 1;
+            *self = cnt;
+            cnt as usize
+        }
+
+        fn decrease_count(&mut self) -> usize {
+            let cnt = *self - 1;
+            *self = cnt;
+            cnt as usize
+        }
+
+        fn current_count(&self) -> usize {
+            *self as usize
+        }
+
+        unsafe fn reset_count(&mut self) {
+            (*self) = 1;
+        }
+    }
+
     impl Counter for AtomicU32 {
 
         fn increase_count(&mut self) -> usize {
@@ -186,9 +233,50 @@ pub mod cmpsptr {
         unsafe fn reset_count(&mut self) {
             (*self).store(1, Ordering::SeqCst);
         }
+
     }
 
-    pub trait CmpsRfc: Counter {
+    impl Counter for AtomicU64 {
+
+        fn increase_count(&mut self) -> usize {
+            (*self).fetch_add(1, Ordering::SeqCst) as usize
+        }
+
+        fn decrease_count(&mut self) -> usize {
+            (*self).fetch_min(1, Ordering::SeqCst) as usize
+        }
+
+        fn current_count(&self) -> usize {
+            self.load(Ordering::SeqCst) as usize
+        }
+
+        unsafe fn reset_count(&mut self) {
+            (*self).store(1, Ordering::SeqCst);
+        }
+
+    }
+
+    impl Counter for AtomicUsize {
+
+        fn increase_count(&mut self) -> usize {
+            (*self).fetch_add(1, Ordering::SeqCst) as usize
+        }
+
+        fn decrease_count(&mut self) -> usize {
+            (*self).fetch_min(1, Ordering::SeqCst) as usize
+        }
+
+        fn current_count(&self) -> usize {
+            self.load(Ordering::SeqCst) as usize
+        }
+
+        unsafe fn reset_count(&mut self) {
+            (*self).store(1, Ordering::SeqCst);
+        }
+
+    }
+
+    pub trait CmpsRfc: Counter + Clone {
         type CmpsType;
 
         unsafe fn new() -> Self;
@@ -272,6 +360,7 @@ pub mod cmpsptr {
         fn clone(&self) -> CmpsPtr<'a, T, CMPS_LEVEL, NEW_ALLOC> {
             CmpsPtr::<'a, T, CMPS_LEVEL, NEW_ALLOC>::new_copy(self._ptr)
         }
+        
     }
 
     impl<T, const CMPS_LEVEL: i32, const NEW_ALLOC: bool> Deref for CmpsPtr<'_, T, CMPS_LEVEL, NEW_ALLOC> {
@@ -467,6 +556,7 @@ pub mod cmpsptr {
         fn ptr_mut(&mut self) -> &mut T {
             self._ptr.ptr_mut()
         }
+
     }
 
     pub struct CmpsShr<'a, T: 'a, C: 'a, const CMPS_LEVEL: i32> where C: Counter {
@@ -581,14 +671,14 @@ pub mod cmpsptr {
 
     }
 
-    pub struct CmpsCow<T: CmpsRfc> where T::CmpsType: Clone {
+    pub struct CmpsCow<T: CmpsRfc, const IMPLICIT: bool> where T::CmpsType: Clone {
         _ptr: T
     }
 
-    impl<T: CmpsRfc> CmpsCow<T> where T::CmpsType: Clone {
+    impl<T: CmpsRfc, const IMPLICIT: bool> CmpsCow<T, IMPLICIT> where T::CmpsType: Clone {
         
         #[inline(always)]
-        pub unsafe fn new() -> CmpsCow<T> {
+        pub unsafe fn new() -> CmpsCow<T, IMPLICIT> {
             CmpsCow {
                 _ptr: CmpsRfc::new()
             }
@@ -608,7 +698,7 @@ pub mod cmpsptr {
 
     }
 
-    impl<T: CmpsRfc> Deref for CmpsCow<T> where T::CmpsType: Clone {
+    impl<T: CmpsRfc, const IMPLICIT: bool> Deref for CmpsCow<T, IMPLICIT> where T::CmpsType: Clone {
         type Target = T;
         #[inline(always)]
         fn deref(&self) -> &Self::Target {
@@ -616,11 +706,22 @@ pub mod cmpsptr {
         }
     }
 
-    impl<T: CmpsRfc> DerefMut for CmpsCow<T> where T::CmpsType: Clone {
+    impl<T: CmpsRfc, const IMPLICIT: bool> DerefMut for CmpsCow<T, IMPLICIT> where T::CmpsType: Clone {
         #[inline(always)]
         fn deref_mut(&mut self) -> &mut Self::Target {
-            self.detach();
+            if IMPLICIT {
+                self.detach();
+            }
             &mut self._ptr
+        }
+    }
+
+    impl<T: CmpsRfc, const IMPLICIT: bool> Clone for CmpsCow<T, IMPLICIT> where T::CmpsType: Clone {
+        #[inline(always)]
+        fn clone(&self) -> CmpsCow<T, IMPLICIT> {
+            CmpsCow::<T, IMPLICIT> {
+                _ptr: self._ptr.clone()
+            }
         }
     }
 
