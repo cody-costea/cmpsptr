@@ -77,10 +77,13 @@ struct ListPtr
     UNr _cnt = void;
 
     pragma(inline, true):
-    void clear() @nogc nothrow
+    void clear(const UNr idx) @nogc nothrow
     {
         this._ptr = nil;
-        _ptr_index = 0U;
+        if (idx < _ptr_index)
+        {
+            _ptr_index = idx;
+        }
     }
 
     public:
@@ -100,7 +103,7 @@ struct ListPtr
         return this._cnt;
     }
 
-    UNr decrease() @nogc nothrow
+    UNr decrease(const UNr idx = 0U) @nogc nothrow
     {
         auto cnt = this._cnt;
         if (cnt)
@@ -109,7 +112,7 @@ struct ListPtr
         }
         else
         {
-            this.clear;
+            this.clear(idx);
         }
         return cnt;
     }
@@ -133,7 +136,7 @@ struct ListPtr
 
     Bit opEquals(const ListPtr other) const @nogc nothrow
     {
-        return this._ptr = other._ptr;
+        return this._ptr == other._ptr;
     }
 
     this(Raw!void ptr) @nogc nothrow
@@ -142,13 +145,13 @@ struct ListPtr
         this._cnt = 0U;
     }
 
-    //alias ptr this;
+    alias ptr this;
 }
 
 private
 {
     Vct!ListPtr _ptr_list; //TODO: multiple thread shared access safety and analyze better solutions
-    ZNr _ptr_index = 0U;
+    UNr _ptr_index = 0U;
 }
 
 enum Ownership : SNr
@@ -395,8 +398,8 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 }
                 else
                 {
-                    //TODO: implement and check list reference counting;
-                    (*ptrList)[ptr - 1U].decrease;
+                    const auto idx = ptr - 1U;
+                    (*ptrList)[idx].decrease(idx);
                 }
             }
             return true;
@@ -470,14 +473,13 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     if (oldPtr > 0U && !((*ptrList)[oldPtr - 1U].decrease))
                     {
                         
-                        //TODO: implement and check list reference counting;
                         (*ptrList)[oldPtr - 1U] = ListPtr(ptr);
                         return;
                     }
                 }
             }
-            ZNr ptrLength = ptrList.length;
-            for (UNr i = 0U; i < ptrLength; i += 1U)
+            UNr ptrLength = cast(UNr)ptrList.length;
+            for (UNr i = _ptr_index; i < ptrLength; i += 1U)
             {
                 auto lPtr = (*ptrList)[i];
                 do
@@ -505,12 +507,13 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             ptrList.insert(ListPtr(ptr));
             static if (_ONLY_LIST)
             {
-                this._ptr = cast(U)(ptrLength + 1U);
+                this._ptr = cast(U)(++ptrLength);
             }
             else
             {
-                this._ptr = cast(U)(((ptrLength + 1U) << 1U) | 1U);
+                this._ptr = cast(U)(((++ptrLength) << 1U) | 1U);
             }
+            _ptr_index = ptrLength;
         }
 
         @trusted public void ptr(P, const Bit remove = true)(P* ptr) if (is(P == T) || is(P == Nil))
