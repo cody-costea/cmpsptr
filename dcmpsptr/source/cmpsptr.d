@@ -298,7 +298,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             {
                 return false;
             }
-            if (_ONLY_LIST || (ptr & 1U) == 1U)
+            /*if (_ONLY_LIST || (ptr & 1U) == 1U)
             {
                 auto ptrList = &_ptr_list;
                 static if (!_ONLY_LIST)
@@ -316,9 +316,10 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                 }
                 else
                 {
+                    //TODO: implement and check list reference counting;
                     (*ptrList)[ptr - 1U] = nil;
                 }
-            }
+            }*/
             return true;
         }
 
@@ -378,7 +379,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
         @system private void listPtr(const Bit remove = true)(T* ptr) @nogc nothrow
         {
             auto ptrList = &_ptr_list;
-            static if (remove)
+            /*static if (remove)
             {
                 auto oldPtr = this._ptr;
                 if (_ONLY_LIST || (oldPtr & 1U) == 1U)
@@ -389,17 +390,26 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     }
                     if (oldPtr > 0U)
                     {
+                        //TODO: implement and check list reference counting;
                         (*ptrList)[oldPtr - 1U] = ptr;
                         return;
                     }
                 }
-            }
+            }*/
             ZNr ptrLength = ptrList.length;
             for (UNr i = 0U; i < ptrLength; i += 1U)
             {
-                if ((*ptrList)[i] == nil)
+                auto lPtr = (*ptrList)[i];
+                do
                 {
-                    (*ptrList)[i] = ptr;
+                    if (lPtr == nil)
+                    {
+                        (*ptrList)[i] = ptr;
+                    }
+                    else if (lPtr != ptr)
+                    {
+                        break;
+                    }
                     static if (_ONLY_LIST)
                     {
                         this._ptr = i + 1U;
@@ -410,6 +420,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     }
                     return;
                 }
+                while(false);
             }
             ptrList.insert(ptr);
             static if (_ONLY_LIST)
@@ -1608,7 +1619,7 @@ struct IdxHndl(alias array, U = Idx, const Bit compress = true, const Bit implic
             return cast(T)array[this._idx];
         }
 
-        @safe T* ptr() const @nogc nothrow
+        @trusted T* ptr() const @nogc nothrow
         {
             return &(this.obj());
         }
