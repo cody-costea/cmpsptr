@@ -101,7 +101,7 @@ void doTests()
     printf("testArr2 = %d\n", cast(SNr)testArr2);
 }
 
-extern (C) int main(string[] args)
+extern (C) int main()
 {
     doTests;
     return 0;
