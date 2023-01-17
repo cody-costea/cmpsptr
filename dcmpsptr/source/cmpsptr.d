@@ -796,7 +796,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
             {                
                 if ((idx & 1U) == 1U)
                 {
-                    (_ptr_list)[idx - 1U].increase;
+                    (_ptr_list)[(idx >>> 1U) - 1U].increase;
                 }
             }
         }
