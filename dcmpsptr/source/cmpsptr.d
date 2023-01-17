@@ -108,7 +108,7 @@ struct ListPtr
         auto cnt = this._cnt;
         if (cnt)
         {
-            this._cnt = --cnt;
+            this._cnt = cnt - 1;
         }
         else
         {
@@ -470,10 +470,11 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     {
                         oldPtr >>>= 1;
                     }
-                    if (oldPtr > 0U && !((*ptrList)[oldPtr - 1U].decrease))
+                    UNr idx = void;
+                    if (oldPtr > 0U && !((*ptrList)[(idx = oldPtr - 1U)].decrease(idx)))
                     {
                         
-                        (*ptrList)[oldPtr - 1U] = ListPtr(ptr);
+                        (*ptrList)[idx] = ListPtr(ptr);
                         return;
                     }
                 }
@@ -492,6 +493,7 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                     {
                         break;
                     }
+                    (*ptrList)[i].increase;
                     static if (_ONLY_LIST)
                     {
                         this._ptr = i + 1U;
