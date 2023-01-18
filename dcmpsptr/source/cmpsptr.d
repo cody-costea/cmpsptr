@@ -93,7 +93,12 @@ struct ListPtr
         this._cnt = 0U;
     }
 
-    Raw!void ptr() const @nogc nothrow
+    auto ptr() @nogc nothrow
+    {
+        return this._ptr;
+    }
+
+    auto ptr() const @nogc nothrow
     {
         return this._ptr;
     }
@@ -103,14 +108,14 @@ struct ListPtr
         return this._cnt;
     }
 
-    UNr decrease(const UNr idx = 0U) @nogc nothrow
+    UNr decrease(const Bit clear = true)(const UNr idx = 0U) @nogc nothrow
     {
         auto cnt = this._cnt;
         if (cnt)
         {
             this._cnt = cnt - 1;
         }
-        else
+        else static if (clear)
         {
             this.clear(idx);
         }
@@ -129,9 +134,9 @@ struct ListPtr
         return cast(PNr)this._ptr;
     }
 
-    SNr opCmp(const ListPtr other) const @nogc nothrow
+    PNr opCmp(const ListPtr other) const @nogc nothrow
     {
-        return this._ptr - other._ptr;
+        return cast(PNr)(this._ptr - other._ptr);
     }
 
     Bit opEquals(const ListPtr other) const @nogc nothrow
@@ -471,9 +476,8 @@ struct CmpsPtr(T, const Own own = Own.sharedCounted, const Opt opt = Opt.nullabl
                         oldPtr >>>= 1;
                     }
                     UNr idx = void;
-                    if (oldPtr > 0U && !((*ptrList)[(idx = oldPtr - 1U)].decrease(idx)))
+                    if (oldPtr > 0U && !((*ptrList)[(idx = oldPtr - 1U)].decrease!false(idx)))
                     {
-                        
                         (*ptrList)[idx] = ListPtr(ptr);
                         return;
                     }
