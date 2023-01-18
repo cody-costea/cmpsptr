@@ -548,7 +548,7 @@ namespace cmpsptr
                     }
                     //ptrList->shrink_to_fit();
                 }
-                else
+                /*else
                 {
                     auto idx = ptr - 1U;
                     if (idx < ptrList->size())
@@ -559,7 +559,7 @@ namespace cmpsptr
                             _null_idx = idx;
                         }
                     } //TODO: analyze "else" case
-                }
+                }*/
                 //uniqueLocker.unlock();
                 //_locker.unlock();
             }
@@ -575,7 +575,7 @@ namespace cmpsptr
             //uniqueLocker.lock();
             //_locker.lock();
             auto ptrList = &_ptr_list;
-            if (listed(oldPtr))
+            /*if (listed(oldPtr))
             {
                 oldPtr >>= 1;
                 if (oldPtr > 0U)
@@ -583,7 +583,7 @@ namespace cmpsptr
                     (*ptrList)[oldPtr - 1U] = const_cast<void*>(reinterpret_cast<const void*>(ptr));
                     return;
                 }
-            }
+            }*/
             uint32_t ptrListLen = ptrList->size();
             for (uint32_t i = _null_idx; i < ptrListLen; i += 1U)
             {
